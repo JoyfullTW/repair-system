@@ -261,6 +261,7 @@ let state = {
   signupError: "",
   stores: [],             // 供申請帳號時選擇門市
   newReport: { step:1, repairType:null, assetId:null, assetLabel:"", generalCategory:null,
+               selectedStoreId: null,
                reportDate: new Date().toISOString().slice(0,10),
                faultCategory:"", faultReason:"", suspectedCause:"", faultDescription:"",
                reporterName:"", reporterPhone:"", urgency:null, photos:[] },
@@ -363,6 +364,7 @@ function renderProfileMissing(){
   </div>`;
 }
 function renderHome(){
+  const notStoreAccount = state.profile && state.profile.role !== "store";
   return `
   <header class="topbar"><h1>🔧 總務報修系統</h1><span class="top-right logout-link" data-action="do-logout">LOGOUT</span></header>
   <main>
@@ -371,6 +373,7 @@ function renderHome(){
       <h1>${state.storeName || "門市"}</h1>
       <p>FACILITY REPORTING SYSTEM</p>
     </div>
+    ${notStoreAccount ? `<div class="banner" style="background:var(--chip-bg); color:var(--ink-soft);">ℹ️ 此帳號角色為「${state.profile.role}」，未綁定固定門市，新增報修時可自行選擇代表門市。</div>` : ""}
     <div class="cta-grid">
       <div class="cta" data-action="go-new-report">
         <div class="ico">🧰</div>
@@ -391,13 +394,23 @@ function renderNewReport(){
 
   let body = "";
   if(s.step === 1){
+    const needsStorePicker = !state.storeId; // 總務/管理者等未綁定固定門市的帳號
+    const storeOptions = state.stores.map(st=>`<option value="${st.id}" ${s.selectedStoreId===st.id?'selected':''}>${st.name}</option>`).join("");
+    const typeCardsDisabled = needsStorePicker && !s.selectedStoreId;
     body = `
-      <h2 style="margin:4px 0 16px;">這是哪一種報修？</h2>
-      <div class="card" data-action="pick-type" data-type="asset" style="cursor:pointer;">
+      ${needsStorePicker ? `
+        <label class="field-label">代表門市送出（此帳號未綁定固定門市）</label>
+        <select id="report-store-picker">
+          <option value="">請選擇門市…</option>
+          ${storeOptions}
+        </select>
+      ` : ""}
+      <h2 style="margin:16px 0 16px;">這是哪一種報修？</h2>
+      <div class="card" data-action="pick-type" data-type="asset" style="cursor:pointer; ${typeCardsDisabled?'opacity:.4; pointer-events:none;':''}">
         <strong>🧊 連結既有資產</strong>
         <p style="color:var(--ink-soft); font-size:13px; margin:6px 0 0;">冰箱、製冰機、爐具等已登記的設備</p>
       </div>
-      <div class="card" data-action="pick-type" data-type="general" style="cursor:pointer;">
+      <div class="card" data-action="pick-type" data-type="general" style="cursor:pointer; ${typeCardsDisabled?'opacity:.4; pointer-events:none;':''}">
         <strong>🚿 一般報修（無資產）</strong>
         <p style="color:var(--ink-soft); font-size:13px; margin:6px 0 0;">水電、門鎖、牆面、招牌、排水等</p>
       </div>`;
@@ -510,6 +523,7 @@ function renderMyCases(){
 
 function ticketHtml(c){
   const needsAction = ACTIVE_STATUSES.includes(c.status);
+  const subLine = [c.store_name, c.asset_name].filter(Boolean).join(" · ");
   return `
   <div class="ticket" data-urgency="${c.urgency}" data-action="open-case" data-id="${c.id}">
     <div class="ticket-body">
@@ -517,7 +531,7 @@ function ticketHtml(c){
         <div>
           <div class="ticket-no">#${c.case_no}</div>
           <div class="ticket-title">${c.fault_category || c.general_category || '報修案件'}</div>
-          <div class="ticket-sub">${c.asset_name || ''}</div>
+          <div class="ticket-sub">${subLine}</div>
         </div>
         <span class="status-pill" data-active="${needsAction}">${needsAction? '⚠️ ' : ''}${STATUS_LABEL[c.status]||c.status}</span>
       </div>
@@ -581,6 +595,11 @@ function bindEvents(){
   });
   const search = document.getElementById("asset-search");
   if(search) search.addEventListener("input", onAssetSearch);
+  const storePicker = document.getElementById("report-store-picker");
+  if(storePicker) storePicker.addEventListener("change", (e)=>{
+    state.newReport.selectedStoreId = e.target.value || null;
+    render();
+  });
 }
 
 /* ============================================================
@@ -675,7 +694,11 @@ async function onAction(e){
   else if(action === "do-login"){ await doLogin(); }
   else if(action === "do-signup"){ await doSignup(); }
   else if(action === "do-logout"){ await doLogout(); }
-  else if(action === "go-new-report"){ resetNewReport(); state.view="new-report"; render(); }
+  else if(action === "go-new-report"){
+    resetNewReport();
+    if(!state.storeId) await loadStoresForSignup();
+    state.view="new-report"; render();
+  }
   else if(action === "go-my-cases"){ await loadMyCases(); state.view="my-cases"; render(); }
   else if(action === "report-back"){ backReportStep(); }
   else if(action === "pick-type"){ state.newReport.repairType = el.dataset.type; state.newReport.step = 2; render(); }
@@ -701,6 +724,7 @@ async function onAction(e){
 
 function resetNewReport(){
   state.newReport = { step:1, repairType:null, assetId:null, assetLabel:"", generalCategory:null,
+                       selectedStoreId: null,
                        reportDate: new Date().toISOString().slice(0,10),
                        faultCategory:"", faultReason:"", suspectedCause:"", faultDescription:"",
                        reporterName:"", reporterPhone:"", urgency:null, photos:[] };
@@ -741,12 +765,13 @@ let assetSearchTimer = null;
 function onAssetSearch(e){
   clearTimeout(assetSearchTimer);
   const q = e.target.value.trim();
+  const effectiveStoreId = state.storeId || state.newReport.selectedStoreId;
   assetSearchTimer = setTimeout(async ()=>{
     const box = document.getElementById("asset-results");
     if(!q){ box.innerHTML = "輸入關鍵字開始搜尋…"; return; }
     const { data, error } = await sb.from("assets")
       .select("id, asset_no, name")
-      .eq("store_id", state.storeId)
+      .eq("store_id", effectiveStoreId)
       .or(`name.ilike.%${q}%,asset_no.ilike.%${q}%`)
       .limit(10);
     if(error){ box.innerHTML = "搜尋失敗：" + error.message; return; }
@@ -768,9 +793,15 @@ function onAssetSearch(e){
 
 async function submitReport(){
   const s = state.newReport;
+  const effectiveStoreId = state.storeId || s.selectedStoreId;
+
+  if(!effectiveStoreId){
+    alert("尚未選擇門市，無法送出報修。");
+    return;
+  }
 
   const payload = {
-    store_id: state.storeId,
+    store_id: effectiveStoreId,
     repair_type: s.repairType,
     asset_id: s.repairType === "asset" ? s.assetId : null,
     general_category: s.repairType === "general" ? s.generalCategory : null,
@@ -805,12 +836,15 @@ async function submitReport(){
 }
 
 async function loadMyCases(){
-  const { data, error } = await sb.from("cases")
-    .select("*, assets(name)")
-    .eq("store_id", state.storeId)
-    .order("created_at", { ascending:false });
+  let query = sb.from("cases").select("*, assets(name), stores(name)").order("created_at", { ascending:false });
+  if(state.storeId){
+    query = query.eq("store_id", state.storeId);
+  }else{
+    query = query.limit(50); // 非固定門市帳號（總務/管理者）先限制顯示最近 50 筆，避免列表過長
+  }
+  const { data, error } = await query;
   if(error){ alert("載入失敗：" + error.message); return; }
-  state.cases = (data||[]).map(c=>({ ...c, asset_name: c.assets?.name || "" }));
+  state.cases = (data||[]).map(c=>({ ...c, asset_name: c.assets?.name || "", store_name: c.stores?.name || "" }));
 }
 
 async function openCase(id){
