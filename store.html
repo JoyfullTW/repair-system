@@ -1,0 +1,746 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>總務報修系統｜門市端</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Zen+Maru+Gothic:wght@500;700;900&family=Noto+Sans+TC:wght@400;500;700;900&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  :root{
+    --bg:#FAF7F2;
+    --surface:#FFFFFF;
+    --ink:#2B2420;
+    --ink-soft:#7A6F63;
+    --border:#E7DFD3;
+    --primary:#2F6F4E;      /* 深廚房綠：主要動作 */
+    --primary-ink:#FFFFFF;
+    --urgent:#C1440E;       /* 燒陶橘紅：緊急 */
+    --warn:#B8860B;         /* 芥末黃：影響營運/待處理 */
+    --normal:#5B7A9A;       /* 灰藍：一般 */
+    --ok:#2F6F4E;
+    --chip-bg:#F1ECE2;
+    --radius:16px;
+    --shadow: 0 1px 2px rgba(43,36,32,.04), 0 8px 24px rgba(43,36,32,.06);
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0; background:var(--bg); color:var(--ink);
+    font-family:"Noto Sans TC","Zen Maru Gothic",sans-serif;
+    -webkit-tap-highlight-color:transparent;
+  }
+  h1,h2,h3,.display{ font-family:"Zen Maru Gothic","Noto Sans TC",sans-serif; }
+  #app{ max-width:480px; margin:0 auto; min-height:100vh; display:flex; flex-direction:column; }
+
+  /* ---------- 頂部 ---------- */
+  header.topbar{
+    position:sticky; top:0; z-index:10;
+    background:var(--bg); padding:18px 20px 10px;
+    display:flex; align-items:center; gap:10px;
+  }
+  header.topbar .back{ font-size:20px; cursor:pointer; padding:4px 8px; margin-left:-8px; border-radius:8px; }
+  header.topbar .back:active{ background:var(--chip-bg); }
+  header.topbar h1{ font-size:19px; font-weight:700; margin:0; flex:1; }
+
+  main{ flex:1; padding:6px 20px 100px; }
+
+  /* ---------- 通用元件 ---------- */
+  .card{
+    background:var(--surface); border:1px solid var(--border);
+    border-radius:var(--radius); padding:18px; margin-bottom:14px;
+    box-shadow:var(--shadow);
+  }
+  .btn{
+    display:flex; align-items:center; justify-content:center; gap:8px;
+    width:100%; padding:15px 18px; border-radius:12px; border:none;
+    font-size:16px; font-weight:700; cursor:pointer; font-family:inherit;
+  }
+  .btn-primary{ background:var(--primary); color:var(--primary-ink); }
+  .btn-primary:active{ opacity:.85; }
+  .btn-outline{ background:var(--surface); color:var(--ink); border:1.5px solid var(--border); }
+  .btn-ghost{ background:transparent; color:var(--ink-soft); font-weight:500; }
+  .btn:disabled{ opacity:.4; cursor:not-allowed; }
+
+  label.field-label{ display:block; font-size:13px; font-weight:700; color:var(--ink-soft); margin:16px 0 6px; }
+  label.field-label:first-child{ margin-top:0; }
+  input[type=text], input[type=email], input[type=password], input[type=date], select, textarea{
+    width:100%; padding:13px 14px; border-radius:10px; border:1.5px solid var(--border);
+    font-size:15px; font-family:inherit; color:var(--ink); background:var(--surface);
+  }
+  textarea{ min-height:90px; resize:vertical; }
+  input:focus, select:focus, textarea:focus{ outline:2px solid var(--primary); outline-offset:1px; }
+
+  .chip-group{ display:flex; gap:8px; flex-wrap:wrap; }
+  .chip{
+    padding:10px 16px; border-radius:999px; border:1.5px solid var(--border);
+    background:var(--surface); font-size:14px; font-weight:700; cursor:pointer; color:var(--ink-soft);
+  }
+  .chip[data-selected="true"]{ border-color:transparent; color:#fff; }
+  .chip[data-level="normal"][data-selected="true"]{ background:var(--normal); }
+  .chip[data-level="operational"][data-selected="true"]{ background:var(--warn); }
+  .chip[data-level="urgent"][data-selected="true"]{ background:var(--urgent); }
+
+  /* ---------- 首頁 ---------- */
+  .hero{ text-align:center; padding:28px 8px 10px; }
+  .hero .mark{ font-size:40px; }
+  .hero h1{ font-size:22px; margin:8px 0 2px; }
+  .hero p{ color:var(--ink-soft); font-size:14px; margin:0; }
+  .cta-grid{ display:flex; flex-direction:column; gap:12px; margin-top:20px; }
+  .cta{
+    background:var(--surface); border:1px solid var(--border); border-radius:var(--radius);
+    padding:20px; display:flex; align-items:center; gap:14px; box-shadow:var(--shadow); cursor:pointer;
+  }
+  .cta .ico{ font-size:26px; width:44px; text-align:center; }
+  .cta .txt strong{ display:block; font-size:16px; }
+  .cta .txt span{ font-size:13px; color:var(--ink-soft); }
+  .cta:active{ transform:scale(.98); }
+
+  /* ---------- 進度指示（新增報修） ---------- */
+  .steps{ display:flex; gap:6px; margin:2px 0 18px; }
+  .steps i{ flex:1; height:5px; border-radius:99px; background:var(--border); }
+  .steps i.done{ background:var(--primary); }
+
+  /* ---------- 案件票券樣式（signature element） ---------- */
+  .ticket{
+    background:var(--surface); border-radius:var(--radius); overflow:hidden;
+    box-shadow:var(--shadow); margin-bottom:12px; position:relative; border:1px solid var(--border);
+  }
+  .ticket::before{
+    content:""; position:absolute; left:0; top:0; bottom:0; width:6px;
+  }
+  .ticket[data-urgency="urgent"]::before{ background:var(--urgent); }
+  .ticket[data-urgency="operational"]::before{ background:var(--warn); }
+  .ticket[data-urgency="normal"]::before{ background:var(--normal); }
+  .ticket-body{ padding:16px 16px 14px 20px; }
+  .ticket-top{ display:flex; justify-content:space-between; align-items:flex-start; gap:8px; }
+  .ticket-no{ font-family:monospace; font-size:12px; color:var(--ink-soft); letter-spacing:.5px; }
+  .ticket-title{ font-size:16px; font-weight:700; margin:4px 0 2px; }
+  .ticket-sub{ font-size:13px; color:var(--ink-soft); }
+  .status-pill{
+    font-size:12px; font-weight:700; padding:5px 10px; border-radius:999px;
+    background:var(--chip-bg); color:var(--ink-soft); white-space:nowrap;
+  }
+  .status-pill[data-active="true"]{ background:#EAF2ED; color:var(--primary); }
+  .repeat-flag{
+    margin-top:10px; font-size:12px; font-weight:700; color:var(--urgent);
+    background:#FBEAE2; display:inline-block; padding:5px 10px; border-radius:8px;
+  }
+
+  /* ---------- 照片上傳格 ---------- */
+  .upload-grid{ display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin-top:6px; }
+  .upload-slot{
+    aspect-ratio:1; border-radius:10px; border:1.5px dashed var(--border);
+    display:flex; align-items:center; justify-content:center; color:var(--ink-soft);
+    font-size:22px; background:#FCFAF6; cursor:pointer; overflow:hidden;
+  }
+  .upload-slot img{ width:100%; height:100%; object-fit:cover; }
+
+  /* ---------- 底部固定按鈕列 ---------- */
+  .footer-actions{
+    position:fixed; left:0; right:0; bottom:0; z-index:10;
+    background:linear-gradient(to top, var(--bg) 65%, transparent);
+    padding:18px 20px 22px;
+  }
+  .footer-actions .inner{ max-width:480px; margin:0 auto; }
+
+  .empty{ text-align:center; padding:50px 10px; color:var(--ink-soft); }
+  .empty .mark{ font-size:34px; display:block; margin-bottom:10px; }
+
+  .banner{
+    background:#FBEAE2; color:var(--urgent); border-radius:12px; padding:12px 14px;
+    font-size:13px; font-weight:700; margin-bottom:14px;
+  }
+  .success-wrap{ text-align:center; padding:50px 10px 10px; }
+  .success-wrap .mark{ font-size:56px; }
+  .success-wrap h2{ margin:10px 0 4px; }
+  .success-wrap .no{ font-family:monospace; color:var(--ink-soft); font-size:14px; }
+
+  .hidden{ display:none !important; }
+  .filter-row{ display:flex; gap:8px; overflow-x:auto; padding-bottom:4px; margin-bottom:14px; }
+  .filter-row .chip{ white-space:nowrap; }
+
+  /* ---------- 登入頁 ---------- */
+  .login-wrap{ min-height:100vh; display:flex; flex-direction:column; justify-content:center; padding:30px 24px; }
+  .login-mark{ text-align:center; font-size:44px; margin-bottom:6px; }
+  .login-title{ text-align:center; font-size:20px; font-weight:700; margin:0 0 30px; }
+  .error-msg{
+    background:#FBEAE2; color:var(--urgent); font-size:13px; font-weight:600;
+    padding:10px 14px; border-radius:10px; margin-top:10px;
+  }
+  .login-switch{ text-align:center; margin-top:18px; font-size:13px; color:var(--ink-soft); }
+  .login-switch a{ color:var(--primary); font-weight:700; text-decoration:none; cursor:pointer; }
+  .logout-link{ font-size:13px; color:var(--ink-soft); cursor:pointer; text-decoration:underline; }
+  .top-right{ margin-left:auto; }
+</style>
+</head>
+<body>
+<div id="app"></div>
+
+<script>
+/* ============================================================
+   Supabase 設定 — 請把下面兩個值換成你自己的 Supabase 專案設定
+   （Supabase 後台 → Settings → API）
+   ============================================================ */
+const SUPABASE_URL = "https://qvhwwrmduqdjgnuszqvs.supabase.co";
+const SUPABASE_ANON_KEY = "sb_publishable_No3AgE0uvJ_S6OSP3bUePA_zLIIIEXW";
+
+const supabase = (SUPABASE_URL.startsWith("http"))
+  ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
+  : null;
+
+/* ============================================================
+   簡易狀態與畫面路由（單頁應用，比照既有訂購系統的做法）
+   ============================================================ */
+const URGENCY_LABEL = { normal:"一般", operational:"影響營運", urgent:"緊急" };
+const STATUS_LABEL = {
+  new:"新案件", pending_review:"待總務確認", pending_info:"資料待補",
+  initial_troubleshoot:"初步排除中", contacting_vendor:"聯絡廠商中", pending_quote:"等待報價",
+  pending_approval:"等待核准", scheduled:"已安排維修", pending_parts:"等待零件",
+  in_repair:"維修中", pending_store_confirm:"待您確認", repair_done:"維修完成",
+  closed:"已結案", cancelled:"已取消"
+};
+const ACTIVE_STATUSES = ["pending_info","pending_store_confirm"]; // 需要門市動作的狀態
+
+let state = {
+  view: "login",          // login | signup | home | new-report | my-cases | case-detail
+  session: null,
+  profile: null,
+  storeId: null,
+  storeName: "",
+  loginError: "",
+  signupError: "",
+  stores: [],             // 供申請帳號時選擇門市
+  newReport: { step:1, repairType:null, assetId:null, assetLabel:"", generalCategory:null,
+               faultCategory:"", faultDescription:"", urgency:null, photos:[] },
+  cases: [],
+  currentCase: null,
+};
+
+const app = document.getElementById("app");
+
+function render(){
+  if(!supabase){
+    app.innerHTML = configWarning();
+    return;
+  }
+  if(state.view === "login") app.innerHTML = renderLogin();
+  else if(state.view === "signup") app.innerHTML = renderSignup();
+  else if(state.view === "profile-missing") app.innerHTML = renderProfileMissing();
+  else if(state.view === "home") app.innerHTML = renderHome();
+  else if(state.view === "new-report") app.innerHTML = renderNewReport();
+  else if(state.view === "new-report-success") app.innerHTML = renderSuccess();
+  else if(state.view === "my-cases") app.innerHTML = renderMyCases();
+  else if(state.view === "case-detail") app.innerHTML = renderCaseDetail();
+  bindEvents();
+}
+
+function configWarning(){
+  return `
+  <main style="padding:40px 24px;">
+    <div class="card">
+      <h2>⚙️ 尚未設定 Supabase 連線</h2>
+      <p style="color:var(--ink-soft); font-size:14px; line-height:1.7;">
+        請打開 store.html 檔案，找到最上方的
+        <code>SUPABASE_URL</code> 與 <code>SUPABASE_ANON_KEY</code>，
+        換成你自己 Supabase 專案的設定值（在 Supabase 後台 Settings → API 可以找到），
+        存檔後重新整理頁面即可。
+      </p>
+    </div>
+  </main>`;
+}
+
+/* ---------------- 登入頁 ---------------- */
+function renderLogin(){
+  return `
+  <div class="login-wrap">
+    <div class="login-mark">🍱</div>
+    <h1 class="login-title">總務報修系統｜門市端</h1>
+    <label class="field-label">Email</label>
+    <input type="email" id="login-email" placeholder="you@example.com">
+    <label class="field-label">密碼</label>
+    <input type="password" id="login-password" placeholder="請輸入密碼">
+    ${state.loginError ? `<div class="error-msg">${state.loginError}</div>` : ""}
+    <div style="margin-top:20px;">
+      <button class="btn btn-primary" data-action="do-login">登入</button>
+    </div>
+    <div class="login-switch">還沒有帳號？<a data-action="go-signup">申請帳號</a></div>
+  </div>`;
+}
+
+/* ---------------- 申請帳號 ---------------- */
+function renderSignup(){
+  const storeOptions = state.stores.map(s=>`<option value="${s.id}">${s.name}</option>`).join("");
+  return `
+  <div class="login-wrap">
+    <div class="login-mark">📝</div>
+    <h1 class="login-title">申請門市帳號</h1>
+    <label class="field-label">姓名</label>
+    <input type="text" id="signup-name" placeholder="您的姓名">
+    <label class="field-label">Email</label>
+    <input type="email" id="signup-email" placeholder="you@example.com">
+    <label class="field-label">申請門市</label>
+    <select id="signup-store"><option value="">請選擇門市…</option>${storeOptions}</select>
+    <label class="field-label">密碼（至少6碼）</label>
+    <input type="password" id="signup-password" placeholder="設定密碼">
+    ${state.signupError ? `<div class="error-msg">${state.signupError}</div>` : ""}
+    <p style="font-size:12px; color:var(--ink-soft); margin-top:14px; line-height:1.6;">
+      送出後帳號將處於「待啟用」狀態，需由系統管理者確認門市與角色後才能登入使用。
+    </p>
+    <div style="margin-top:10px;">
+      <button class="btn btn-primary" data-action="do-signup">送出申請</button>
+    </div>
+    <div class="login-switch"><a data-action="go-login">‹ 返回登入</a></div>
+  </div>`;
+}
+
+/* ---------------- 帳號存在但尚未設定門市/角色 ---------------- */
+function renderProfileMissing(){
+  return `
+  <div class="login-wrap">
+    <div class="login-mark">⏳</div>
+    <h1 class="login-title">帳號待啟用</h1>
+    <p style="text-align:center; color:var(--ink-soft); font-size:14px; line-height:1.7;">
+      您的帳號已建立，但尚未由系統管理者指派門市與角色。<br>請聯繫總務協助開通後再登入。
+    </p>
+    <div style="margin-top:20px;">
+      <button class="btn btn-outline" data-action="do-logout">登出</button>
+    </div>
+  </div>`;
+}
+function renderHome(){
+  return `
+  <header class="topbar"><h1>🍱 總務報修系統</h1><span class="top-right logout-link" data-action="do-logout">登出</span></header>
+  <main>
+    <div class="hero">
+      <div class="mark">🛠️</div>
+      <h1>${state.storeName || "門市"}</h1>
+      <p>設備壞了嗎？幾個步驟就能送出報修</p>
+    </div>
+    <div class="cta-grid">
+      <div class="cta" data-action="go-new-report">
+        <div class="ico">📋</div>
+        <div class="txt"><strong>新增報修</strong><span>設備故障、水電、環境問題</span></div>
+      </div>
+      <div class="cta" data-action="go-my-cases">
+        <div class="ico">📂</div>
+        <div class="txt"><strong>我的案件</strong><span>查看進度、補件、確認完修</span></div>
+      </div>
+    </div>
+  </main>`;
+}
+
+/* ---------------- 新增報修（多步驟） ---------------- */
+function renderNewReport(){
+  const s = state.newReport;
+  const stepDots = [1,2,3,4].map(n=>`<i class="${n<=s.step?'done':''}"></i>`).join("");
+
+  let body = "";
+  if(s.step === 1){
+    body = `
+      <h2 style="margin:4px 0 16px;">這是哪一種報修？</h2>
+      <div class="card" data-action="pick-type" data-type="asset" style="cursor:pointer;">
+        <strong>🧊 連結既有資產</strong>
+        <p style="color:var(--ink-soft); font-size:13px; margin:6px 0 0;">冰箱、製冰機、爐具等已登記的設備</p>
+      </div>
+      <div class="card" data-action="pick-type" data-type="general" style="cursor:pointer;">
+        <strong>🚿 一般報修（無資產）</strong>
+        <p style="color:var(--ink-soft); font-size:13px; margin:6px 0 0;">水電、門鎖、牆面、招牌、排水等</p>
+      </div>`;
+  } else if(s.step === 2 && s.repairType === "asset"){
+    body = `
+      <h2 style="margin:4px 0 16px;">選擇資產</h2>
+      <label class="field-label">搜尋資產編號或名稱</label>
+      <input type="text" id="asset-search" placeholder="例如：製冰機 或 C002-17-001-0001">
+      <div id="asset-results" style="margin-top:12px; color:var(--ink-soft); font-size:13px;">輸入關鍵字開始搜尋…</div>`;
+  } else if(s.step === 2 && s.repairType === "general"){
+    const cats = ["水電","門鎖","牆面","招牌","排水","其他"];
+    body = `
+      <h2 style="margin:4px 0 16px;">選擇一般報修類別</h2>
+      <div class="chip-group">
+        ${cats.map(c=>`<span class="chip" data-action="pick-general" data-value="${c}" data-selected="${s.generalCategory===c}">${c}</span>`).join("")}
+      </div>`;
+  } else if(s.step === 3){
+    body = `
+      <h2 style="margin:4px 0 16px;">填寫故障資訊</h2>
+      <label class="field-label">故障類別</label>
+      <input type="text" id="fault-category" value="${s.faultCategory}" placeholder="例如：無法通電、異音、漏水">
+      <label class="field-label">故障描述</label>
+      <textarea id="fault-desc" placeholder="請描述目前的狀況…">${s.faultDescription}</textarea>
+      <label class="field-label">緊急程度</label>
+      <div class="chip-group">
+        <span class="chip" data-level="normal" data-action="pick-urgency" data-value="normal" data-selected="${s.urgency==='normal'}">一般</span>
+        <span class="chip" data-level="operational" data-action="pick-urgency" data-value="operational" data-selected="${s.urgency==='operational'}">影響營運</span>
+        <span class="chip" data-level="urgent" data-action="pick-urgency" data-value="urgent" data-selected="${s.urgency==='urgent'}">緊急</span>
+      </div>
+      <p style="font-size:12px; color:var(--ink-soft); line-height:1.6; margin-top:10px;">
+        一般：不影響營業　／　影響營運：還能勉強運作，已造成不便　／　緊急：完全無法使用，衝擊營業或食安安全
+      </p>`;
+  } else if(s.step === 4){
+    body = `
+      <h2 style="margin:4px 0 6px;">上傳照片／影片</h2>
+      <p style="font-size:13px; color:var(--ink-soft); margin:0 0 4px;">影片限 30 秒內，最多 5 個檔案</p>
+      <div class="upload-grid">
+        ${[0,1,2,3,4].map(i=>`<div class="upload-slot" data-action="upload-slot" data-index="${i}">${s.photos[i]?'✅':'＋'}</div>`).join("")}
+      </div>
+      <div class="card" style="margin-top:20px;">
+        <strong style="font-size:14px;">送出前確認</strong>
+        <p style="font-size:13px; color:var(--ink-soft); margin:8px 0 2px;">類型：${s.repairType==='asset'?('資產：'+(s.assetLabel||'—')):('一般報修：'+(s.generalCategory||'—'))}</p>
+        <p style="font-size:13px; color:var(--ink-soft); margin:2px 0;">故障類別：${s.faultCategory||'—'}</p>
+        <p style="font-size:13px; color:var(--ink-soft); margin:2px 0;">緊急程度：${URGENCY_LABEL[s.urgency]||'—'}</p>
+      </div>`;
+  }
+
+  return `
+  <header class="topbar">
+    <span class="back" data-action="report-back">‹</span>
+    <h1>新增報修</h1>
+  </header>
+  <main>
+    <div class="steps">${stepDots}</div>
+    ${body}
+  </main>
+  <div class="footer-actions"><div class="inner">
+    ${s.step < 4
+      ? `<button class="btn btn-primary" id="next-btn" data-action="report-next">下一步</button>`
+      : `<button class="btn btn-primary" data-action="report-submit">送出報修</button>`}
+  </div></div>`;
+}
+
+function renderSuccess(){
+  return `
+  <main>
+    <div class="success-wrap">
+      <div class="mark">✅</div>
+      <h2>報修已送出</h2>
+      <p class="no">案件編號　${state.currentCase?.case_no || ''}</p>
+    </div>
+  </main>
+  <div class="footer-actions"><div class="inner">
+    <button class="btn btn-primary" data-action="go-home">回到首頁</button>
+  </div></div>`;
+}
+
+/* ---------------- 我的案件列表 ---------------- */
+function renderMyCases(){
+  const rows = state.cases;
+  return `
+  <header class="topbar">
+    <span class="back" data-action="go-home">‹</span>
+    <h1>我的案件</h1>
+  </header>
+  <main>
+    ${rows.length === 0 ? `
+      <div class="empty"><span class="mark">📭</span>目前沒有報修案件</div>
+    ` : rows.map(c => ticketHtml(c)).join("")}
+  </main>`;
+}
+
+function ticketHtml(c){
+  const needsAction = ACTIVE_STATUSES.includes(c.status);
+  return `
+  <div class="ticket" data-urgency="${c.urgency}" data-action="open-case" data-id="${c.id}">
+    <div class="ticket-body">
+      <div class="ticket-top">
+        <div>
+          <div class="ticket-no">#${c.case_no}</div>
+          <div class="ticket-title">${c.fault_category || c.general_category || '報修案件'}</div>
+          <div class="ticket-sub">${c.asset_name || ''}</div>
+        </div>
+        <span class="status-pill" data-active="${needsAction}">${needsAction? '⚠️ ' : ''}${STATUS_LABEL[c.status]||c.status}</span>
+      </div>
+      ${c.repeat_fault ? `<div class="repeat-flag">⚠️ 重複故障／優先處理</div>` : ""}
+    </div>
+  </div>`;
+}
+
+/* ---------------- 案件詳情 ---------------- */
+function renderCaseDetail(){
+  const c = state.currentCase;
+  if(!c) return `<main><div class="empty">找不到案件</div></main>`;
+
+  let actionArea = "";
+  if(c.status === "pending_info"){
+    actionArea = `
+      <div class="card">
+        <strong>📎 需要補充資料</strong>
+        <p style="font-size:13px; color:var(--ink-soft);">總務標記此案件需要補件，請上傳所需的照片或說明。</p>
+        <div class="upload-grid">${[0,1,2].map(i=>`<div class="upload-slot" data-action="upload-supplement" data-index="${i}">＋</div>`).join("")}</div>
+      </div>`;
+  } else if(c.status === "pending_store_confirm"){
+    actionArea = `
+      <div class="card">
+        <strong>✅ 請確認維修結果</strong>
+        <p style="font-size:13px; color:var(--ink-soft);">請上傳維修後照片，並確認設備是否恢復正常。</p>
+        <div class="upload-grid">${[0,1,2].map(i=>`<div class="upload-slot" data-action="upload-after" data-index="${i}">＋</div>`).join("")}</div>
+        <div style="display:flex; gap:10px; margin-top:14px;">
+          <button class="btn btn-primary" data-action="confirm-result" data-value="normal">正常，可以結案</button>
+        </div>
+        <button class="btn btn-ghost" data-action="confirm-result" data-value="abnormal">還是異常，需要再處理</button>
+      </div>`;
+  }
+
+  return `
+  <header class="topbar">
+    <span class="back" data-action="go-my-cases">‹</span>
+    <h1>#${c.case_no}</h1>
+  </header>
+  <main>
+    <div class="card">
+      <span class="status-pill" data-active="true">${STATUS_LABEL[c.status]||c.status}</span>
+      <p style="margin:12px 0 2px; font-weight:700;">${c.fault_category||c.general_category||''}</p>
+      <p style="font-size:13px; color:var(--ink-soft); margin:2px 0;">${c.fault_description||''}</p>
+      <p style="font-size:12px; color:var(--ink-soft); margin-top:10px;">緊急程度：${URGENCY_LABEL[c.urgency]||''}</p>
+    </div>
+    ${actionArea}
+    <div class="card">
+      <strong style="font-size:14px;">處理進度</strong>
+      <div id="case-timeline" style="margin-top:10px; font-size:13px; color:var(--ink-soft);">載入中…</div>
+    </div>
+  </main>`;
+}
+
+/* ============================================================
+   事件綁定與資料存取
+   ============================================================ */
+function bindEvents(){
+  app.querySelectorAll("[data-action]").forEach(el=>{
+    el.addEventListener("click", onAction);
+  });
+  const search = document.getElementById("asset-search");
+  if(search) search.addEventListener("input", onAssetSearch);
+}
+
+async function onAction(e){
+  const el = e.currentTarget;
+  const action = el.dataset.action;
+
+  if(action === "go-home"){ state.view="home"; render(); }
+  else if(action === "go-login"){ state.loginError=""; state.view="login"; render(); }
+  else if(action === "go-signup"){ state.signupError=""; await loadStoresForSignup(); state.view="signup"; render(); }
+  else if(action === "do-login"){ await doLogin(); }
+  else if(action === "do-signup"){ await doSignup(); }
+  else if(action === "do-logout"){ await doLogout(); }
+  else if(action === "go-new-report"){ resetNewReport(); state.view="new-report"; render(); }
+  else if(action === "go-my-cases"){ await loadMyCases(); state.view="my-cases"; render(); }
+  else if(action === "report-back"){ backReportStep(); }
+  else if(action === "pick-type"){ state.newReport.repairType = el.dataset.type; state.newReport.step = 2; render(); }
+  else if(action === "pick-general"){ state.newReport.generalCategory = el.dataset.value; render(); }
+  else if(action === "pick-urgency"){ state.newReport.urgency = el.dataset.value; render(); }
+  else if(action === "report-next"){ advanceReportStep(); }
+  else if(action === "report-submit"){ await submitReport(); }
+  else if(action === "open-case"){ await openCase(el.dataset.id); }
+  else if(action === "confirm-result"){ await confirmCaseResult(el.dataset.value); }
+  else if(action === "upload-slot"){ alert("照片上傳串接 Supabase Storage：可依附件6分類（故障照片/影片、回執單等）擴充實際上傳邏輯。"); }
+}
+
+function resetNewReport(){
+  state.newReport = { step:1, repairType:null, assetId:null, assetLabel:"", generalCategory:null,
+                       faultCategory:"", faultDescription:"", urgency:null, photos:[] };
+}
+
+function backReportStep(){
+  if(state.newReport.step > 1){ state.newReport.step -= 1; render(); }
+  else { state.view = "home"; render(); }
+}
+
+function advanceReportStep(){
+  const s = state.newReport;
+  // 讀取目前畫面上的輸入值
+  if(s.step === 3){
+    s.faultCategory = document.getElementById("fault-category")?.value || "";
+    s.faultDescription = document.getElementById("fault-desc")?.value || "";
+  }
+  if(s.step === 1 && !s.repairType) return;
+  if(s.step === 2){
+    if(s.repairType === "asset" && !s.assetId) { alert("請先選擇資產"); return; }
+    if(s.repairType === "general" && !s.generalCategory){ alert("請選擇報修類別"); return; }
+  }
+  if(s.step === 3 && !s.urgency){ alert("請選擇緊急程度"); return; }
+  s.step += 1;
+  render();
+}
+
+let assetSearchTimer = null;
+function onAssetSearch(e){
+  clearTimeout(assetSearchTimer);
+  const q = e.target.value.trim();
+  assetSearchTimer = setTimeout(async ()=>{
+    const box = document.getElementById("asset-results");
+    if(!q){ box.innerHTML = "輸入關鍵字開始搜尋…"; return; }
+    const { data, error } = await supabase.from("assets")
+      .select("id, asset_no, name")
+      .eq("store_id", state.storeId)
+      .or(`name.ilike.%${q}%,asset_no.ilike.%${q}%`)
+      .limit(10);
+    if(error){ box.innerHTML = "搜尋失敗：" + error.message; return; }
+    if(!data || data.length===0){ box.innerHTML = "找不到符合的資產"; return; }
+    box.innerHTML = data.map(a=>`
+      <div class="card" style="padding:12px; cursor:pointer;" data-pick-asset="${a.id}" data-label="${a.asset_no} ${a.name}">
+        <strong style="font-size:14px;">${a.name}</strong>
+        <div style="font-family:monospace; font-size:12px; color:var(--ink-soft);">${a.asset_no}</div>
+      </div>`).join("");
+    box.querySelectorAll("[data-pick-asset]").forEach(el=>{
+      el.addEventListener("click", ()=>{
+        state.newReport.assetId = el.dataset.pickAsset;
+        state.newReport.assetLabel = el.dataset.label;
+        advanceReportStep();
+      });
+    });
+  }, 300);
+}
+
+async function submitReport(){
+  const s = state.newReport;
+  const caseNo = "TMP-" + Date.now().toString().slice(-8); // 正式編號規則於後端 trigger 產生
+
+  const payload = {
+    case_no: caseNo,
+    store_id: state.storeId,
+    repair_type: s.repairType,
+    asset_id: s.repairType === "asset" ? s.assetId : null,
+    general_category: s.repairType === "general" ? s.generalCategory : null,
+    fault_category: s.faultCategory,
+    fault_description: s.faultDescription,
+    urgency: s.urgency,
+    status: "new"
+  };
+
+  const { data, error } = await supabase.from("cases").insert(payload).select().single();
+  if(error){ alert("送出失敗：" + error.message); return; }
+  state.currentCase = data;
+  state.view = "new-report-success";
+  render();
+}
+
+async function loadMyCases(){
+  const { data, error } = await supabase.from("cases")
+    .select("*, assets(name)")
+    .eq("store_id", state.storeId)
+    .order("created_at", { ascending:false });
+  if(error){ alert("載入失敗：" + error.message); return; }
+  state.cases = (data||[]).map(c=>({ ...c, asset_name: c.assets?.name || "" }));
+}
+
+async function openCase(id){
+  const { data, error } = await supabase.from("cases").select("*, assets(name)").eq("id", id).single();
+  if(error){ alert("載入失敗：" + error.message); return; }
+  state.currentCase = { ...data, asset_name: data.assets?.name || "" };
+  state.view = "case-detail";
+  render();
+  loadCaseTimeline(id);
+}
+
+async function loadCaseTimeline(caseId){
+  const el = document.getElementById("case-timeline");
+  if(!el) return;
+  const { data, error } = await supabase.from("case_logs")
+    .select("*").eq("case_id", caseId).order("created_at", { ascending:true });
+  if(error){ el.textContent = "無法載入處理歷程"; return; }
+  if(!data || data.length===0){ el.textContent = "尚無處理紀錄"; return; }
+  el.innerHTML = data.map(l=>`<div style="margin-bottom:6px;">・${new Date(l.created_at).toLocaleString('zh-TW')}　${l.note||l.action_type}</div>`).join("");
+}
+
+async function confirmCaseResult(result){
+  const c = state.currentCase;
+  const newStatus = result === "normal" ? "closed" : "in_repair";
+  const { error } = await supabase.from("cases").update({
+    store_confirm_result: result,
+    status: newStatus,
+    closed_at: result === "normal" ? new Date().toISOString() : null
+  }).eq("id", c.id);
+  if(error){ alert("更新失敗：" + error.message); return; }
+  alert(result === "normal" ? "已確認正常，案件結案" : "已標記異常，案件將退回維修中");
+  await openCase(c.id);
+}
+
+/* ============================================================
+   帳號：登入 / 申請 / 登出
+   ============================================================ */
+async function doLogin(){
+  const email = document.getElementById("login-email")?.value.trim();
+  const password = document.getElementById("login-password")?.value;
+  if(!email || !password){ state.loginError = "請輸入 Email 與密碼"; render(); return; }
+
+  const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+  if(error){ state.loginError = "登入失敗：" + error.message; render(); return; }
+  state.loginError = "";
+  await loadProfileAndEnter();
+}
+
+async function loadStoresForSignup(){
+  const { data, error } = await supabase.from("stores").select("id, name").eq("status","active").order("name");
+  if(!error) state.stores = data || [];
+}
+
+async function doSignup(){
+  const name = document.getElementById("signup-name")?.value.trim();
+  const email = document.getElementById("signup-email")?.value.trim();
+  const storeId = document.getElementById("signup-store")?.value;
+  const password = document.getElementById("signup-password")?.value;
+
+  if(!name || !email || !storeId || !password || password.length < 6){
+    state.signupError = "請完整填寫所有欄位，密碼至少 6 碼";
+    render(); return;
+  }
+
+  const { data: signUpData, error: signUpError } = await supabase.auth.signUp({ email, password });
+  if(signUpError){ state.signupError = "申請失敗：" + signUpError.message; render(); return; }
+
+  const userId = signUpData.user?.id;
+  if(userId){
+    // 建立對應的 users_profile，狀態預設為 disabled，待系統管理者指派角色後啟用
+    const { error: profileError } = await supabase.from("users_profile").insert({
+      id: userId, display_name: name, role: "store", account_type: "personal",
+      store_id: storeId, status: "disabled"
+    });
+    if(profileError){ state.signupError = "帳號已建立，但資料寫入失敗：" + profileError.message; render(); return; }
+  }
+
+  alert("申請已送出，請等候系統管理者開通帳號。");
+  state.view = "login";
+  render();
+}
+
+async function doLogout(){
+  await supabase.auth.signOut();
+  state.session = null; state.profile = null; state.storeId = null; state.storeName = "";
+  state.view = "login";
+  render();
+}
+
+async function loadProfileAndEnter(){
+  const { data: { session } } = await supabase.auth.getSession();
+  state.session = session;
+  if(!session){ state.view = "login"; render(); return; }
+
+  const { data: profile, error } = await supabase.from("users_profile")
+    .select("*, stores(name)").eq("id", session.user.id).maybeSingle();
+
+  if(error || !profile || profile.status !== "active"){
+    state.view = "profile-missing";
+    render();
+    return;
+  }
+
+  state.profile = profile;
+  state.storeId = profile.store_id;
+  state.storeName = profile.stores?.name || "";
+  state.view = "home";
+  render();
+}
+
+/* ============================================================
+   初始化
+   ============================================================ */
+async function init(){
+  if(!supabase){ render(); return; }
+  const { data: { session } } = await supabase.auth.getSession();
+  if(session){ await loadProfileAndEnter(); }
+  else { state.view = "login"; render(); }
+}
+
+init();
+</script>
+</body>
+</html>
