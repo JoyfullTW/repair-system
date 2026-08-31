@@ -86,6 +86,7 @@
     background:var(--surface); font-size:13px; font-weight:700; cursor:pointer; color:var(--ink-soft);
   }
   .chip[data-selected="true"]{ border-color:transparent; color:#fff; }
+  .chip[data-selected="true"]:not([data-level]){ background:var(--primary); }
   .chip[data-level="normal"][data-selected="true"]{ background:var(--normal); }
   .chip[data-level="operational"][data-selected="true"]{ background:var(--warn); }
   .chip[data-level="urgent"][data-selected="true"]{ background:var(--urgent); }
@@ -260,7 +261,9 @@ let state = {
   signupError: "",
   stores: [],             // 供申請帳號時選擇門市
   newReport: { step:1, repairType:null, assetId:null, assetLabel:"", generalCategory:null,
-               faultCategory:"", faultDescription:"", urgency:null, photos:[] },
+               reportDate: new Date().toISOString().slice(0,10),
+               faultCategory:"", faultReason:"", suspectedCause:"", faultDescription:"",
+               reporterName:"", reporterPhone:"", urgency:null, photos:[] },
   cases: [],
   currentCase: null,
 };
@@ -413,10 +416,20 @@ function renderNewReport(){
   } else if(s.step === 3){
     body = `
       <h2 style="margin:4px 0 16px;">填寫故障資訊</h2>
-      <label class="field-label">故障類別</label>
-      <input type="text" id="fault-category" value="${s.faultCategory}" placeholder="例如：無法通電、異音、漏水">
-      <label class="field-label">故障描述</label>
+      <label class="field-label">報告日期</label>
+      <input type="date" id="report-date" value="${s.reportDate}">
+      <label class="field-label">報修設備</label>
+      <input type="text" id="fault-category" value="${s.faultCategory}" placeholder="例如：冷氣風管、製冰機">
+      <label class="field-label">報修原因</label>
+      <input type="text" id="fault-reason" value="${s.faultReason}" placeholder="例如：冷氣口沒風">
+      <label class="field-label">推測原因（選填）</label>
+      <input type="text" id="suspected-cause" value="${s.suspectedCause}" placeholder="例如：風管脫落固定不了">
+      <label class="field-label">目前狀況</label>
       <textarea id="fault-desc" placeholder="請描述目前的狀況…">${s.faultDescription}</textarea>
+      <label class="field-label">現場報修人</label>
+      <input type="text" id="reporter-name" value="${s.reporterName}" placeholder="現場人員姓名">
+      <label class="field-label">聯絡電話</label>
+      <input type="text" id="reporter-phone" value="${s.reporterPhone}" placeholder="現場人員聯絡電話">
       <label class="field-label">緊急程度</label>
       <div class="chip-group">
         <span class="chip" data-level="normal" data-action="pick-urgency" data-value="normal" data-selected="${s.urgency==='normal'}">一般</span>
@@ -436,7 +449,10 @@ function renderNewReport(){
       <div class="card" style="margin-top:20px;">
         <strong style="font-size:14px;">送出前確認</strong>
         <p style="font-size:13px; color:var(--ink-soft); margin:8px 0 2px;">類型：${s.repairType==='asset'?('資產：'+(s.assetLabel||'—')):('一般報修：'+(s.generalCategory||'—'))}</p>
-        <p style="font-size:13px; color:var(--ink-soft); margin:2px 0;">故障類別：${s.faultCategory||'—'}</p>
+        <p style="font-size:13px; color:var(--ink-soft); margin:2px 0;">報告日期：${s.reportDate||'—'}</p>
+        <p style="font-size:13px; color:var(--ink-soft); margin:2px 0;">報修設備：${s.faultCategory||'—'}</p>
+        <p style="font-size:13px; color:var(--ink-soft); margin:2px 0;">報修原因：${s.faultReason||'—'}</p>
+        <p style="font-size:13px; color:var(--ink-soft); margin:2px 0;">現場報修人：${s.reporterName||'—'}（${s.reporterPhone||'—'}）</p>
         <p style="font-size:13px; color:var(--ink-soft); margin:2px 0;">緊急程度：${URGENCY_LABEL[s.urgency]||'—'}</p>
       </div>`;
   }
@@ -586,7 +602,9 @@ async function onAction(e){
 
 function resetNewReport(){
   state.newReport = { step:1, repairType:null, assetId:null, assetLabel:"", generalCategory:null,
-                       faultCategory:"", faultDescription:"", urgency:null, photos:[] };
+                       reportDate: new Date().toISOString().slice(0,10),
+                       faultCategory:"", faultReason:"", suspectedCause:"", faultDescription:"",
+                       reporterName:"", reporterPhone:"", urgency:null, photos:[] };
 }
 
 function backReportStep(){
@@ -598,15 +616,24 @@ function advanceReportStep(){
   const s = state.newReport;
   // 讀取目前畫面上的輸入值
   if(s.step === 3){
+    s.reportDate = document.getElementById("report-date")?.value || s.reportDate;
     s.faultCategory = document.getElementById("fault-category")?.value || "";
+    s.faultReason = document.getElementById("fault-reason")?.value || "";
+    s.suspectedCause = document.getElementById("suspected-cause")?.value || "";
     s.faultDescription = document.getElementById("fault-desc")?.value || "";
+    s.reporterName = document.getElementById("reporter-name")?.value || "";
+    s.reporterPhone = document.getElementById("reporter-phone")?.value || "";
   }
   if(s.step === 1 && !s.repairType) return;
   if(s.step === 2){
     if(s.repairType === "asset" && !s.assetId) { alert("請先選擇資產"); return; }
     if(s.repairType === "general" && !s.generalCategory){ alert("請選擇報修類別"); return; }
   }
-  if(s.step === 3 && !s.urgency){ alert("請選擇緊急程度"); return; }
+  if(s.step === 3){
+    if(!s.faultCategory){ alert("請填寫報修設備"); return; }
+    if(!s.reporterName){ alert("請填寫現場報修人"); return; }
+    if(!s.urgency){ alert("請選擇緊急程度"); return; }
+  }
   s.step += 1;
   render();
 }
@@ -650,8 +677,13 @@ async function submitReport(){
     repair_type: s.repairType,
     asset_id: s.repairType === "asset" ? s.assetId : null,
     general_category: s.repairType === "general" ? s.generalCategory : null,
+    report_date: s.reportDate,
     fault_category: s.faultCategory,
+    fault_reason: s.faultReason,
+    suspected_cause: s.suspectedCause,
     fault_description: s.faultDescription,
+    reporter_name: s.reporterName,
+    reporter_phone: s.reporterPhone,
     urgency: s.urgency,
     status: "new"
   };
