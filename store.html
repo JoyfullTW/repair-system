@@ -5,32 +5,39 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>總務報修系統｜門市端</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Zen+Maru+Gothic:wght@500;700;900&family=Noto+Sans+TC:wght@400;500;700;900&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=JetBrains+Mono:wght@500;700&family=Noto+Sans+TC:wght@400;500;700;900&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <style>
   :root{
-    --bg:#FAF7F2;
+    --bg:#EEF2F6;
+    --grid:rgba(27,42,65,.05);
     --surface:#FFFFFF;
-    --ink:#2B2420;
-    --ink-soft:#7A6F63;
-    --border:#E7DFD3;
-    --primary:#2F6F4E;      /* 深廚房綠：主要動作 */
+    --ink:#1B2A41;
+    --ink-soft:#5C6B7C;
+    --border:#D2DCE6;
+    --primary:#2C6E8E;      /* 鋼藍：主要動作 */
     --primary-ink:#FFFFFF;
-    --urgent:#C1440E;       /* 燒陶橘紅：緊急 */
-    --warn:#B8860B;         /* 芥末黃：影響營運/待處理 */
-    --normal:#5B7A9A;       /* 灰藍：一般 */
-    --ok:#2F6F4E;
-    --chip-bg:#F1ECE2;
-    --radius:16px;
-    --shadow: 0 1px 2px rgba(43,36,32,.04), 0 8px 24px rgba(43,36,32,.06);
+    --urgent:#D93B30;       /* 安全警示紅：緊急 */
+    --warn:#E2941A;         /* 安全警示黃：影響營運/待處理 */
+    --normal:#5C7A99;       /* 灰藍：一般 */
+    --ok:#2C6E8E;
+    --chip-bg:#E4EAF0;
+    --radius:10px;
+    --shadow: 0 1px 2px rgba(27,42,65,.06), 0 6px 18px rgba(27,42,65,.08);
   }
   *{box-sizing:border-box;}
   body{
-    margin:0; background:var(--bg); color:var(--ink);
-    font-family:"Noto Sans TC","Zen Maru Gothic",sans-serif;
+    margin:0; color:var(--ink);
+    font-family:"Noto Sans TC","Space Grotesk",sans-serif;
     -webkit-tap-highlight-color:transparent;
+    background-color:var(--bg);
+    background-image:
+      linear-gradient(var(--grid) 1px, transparent 1px),
+      linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+    background-size: 24px 24px;
   }
-  h1,h2,h3,.display{ font-family:"Zen Maru Gothic","Noto Sans TC",sans-serif; }
+  h1,h2,h3,.display{ font-family:"Space Grotesk","Noto Sans TC",sans-serif; letter-spacing:-.01em; }
+  .mono{ font-family:"JetBrains Mono",monospace; }
   #app{ max-width:480px; margin:0 auto; min-height:100vh; display:flex; flex-direction:column; }
 
   /* ---------- 頂部 ---------- */
@@ -38,10 +45,11 @@
     position:sticky; top:0; z-index:10;
     background:var(--bg); padding:18px 20px 10px;
     display:flex; align-items:center; gap:10px;
+    border-bottom:1px solid transparent;
   }
-  header.topbar .back{ font-size:20px; cursor:pointer; padding:4px 8px; margin-left:-8px; border-radius:8px; }
+  header.topbar .back{ font-size:20px; cursor:pointer; padding:4px 8px; margin-left:-8px; border-radius:6px; }
   header.topbar .back:active{ background:var(--chip-bg); }
-  header.topbar h1{ font-size:19px; font-weight:700; margin:0; flex:1; }
+  header.topbar h1{ font-size:17px; font-weight:700; margin:0; flex:1; letter-spacing:.02em; }
 
   main{ flex:1; padding:6px 20px 100px; }
 
@@ -53,8 +61,9 @@
   }
   .btn{
     display:flex; align-items:center; justify-content:center; gap:8px;
-    width:100%; padding:15px 18px; border-radius:12px; border:none;
-    font-size:16px; font-weight:700; cursor:pointer; font-family:inherit;
+    width:100%; padding:15px 18px; border-radius:8px; border:none;
+    font-size:15px; font-weight:700; cursor:pointer; font-family:inherit;
+    letter-spacing:.02em;
   }
   .btn-primary{ background:var(--primary); color:var(--primary-ink); }
   .btn-primary:active{ opacity:.85; }
@@ -62,10 +71,10 @@
   .btn-ghost{ background:transparent; color:var(--ink-soft); font-weight:500; }
   .btn:disabled{ opacity:.4; cursor:not-allowed; }
 
-  label.field-label{ display:block; font-size:13px; font-weight:700; color:var(--ink-soft); margin:16px 0 6px; }
+  label.field-label{ display:block; font-size:12px; font-weight:700; color:var(--ink-soft); margin:16px 0 6px; text-transform:uppercase; letter-spacing:.05em; }
   label.field-label:first-child{ margin-top:0; }
   input[type=text], input[type=email], input[type=password], input[type=date], select, textarea{
-    width:100%; padding:13px 14px; border-radius:10px; border:1.5px solid var(--border);
+    width:100%; padding:13px 14px; border-radius:8px; border:1.5px solid var(--border);
     font-size:15px; font-family:inherit; color:var(--ink); background:var(--surface);
   }
   textarea{ min-height:90px; resize:vertical; }
@@ -73,8 +82,8 @@
 
   .chip-group{ display:flex; gap:8px; flex-wrap:wrap; }
   .chip{
-    padding:10px 16px; border-radius:999px; border:1.5px solid var(--border);
-    background:var(--surface); font-size:14px; font-weight:700; cursor:pointer; color:var(--ink-soft);
+    padding:9px 15px; border-radius:6px; border:1.5px solid var(--border);
+    background:var(--surface); font-size:13px; font-weight:700; cursor:pointer; color:var(--ink-soft);
   }
   .chip[data-selected="true"]{ border-color:transparent; color:#fff; }
   .chip[data-level="normal"][data-selected="true"]{ background:var(--normal); }
@@ -82,57 +91,62 @@
   .chip[data-level="urgent"][data-selected="true"]{ background:var(--urgent); }
 
   /* ---------- 首頁 ---------- */
-  .hero{ text-align:center; padding:28px 8px 10px; }
-  .hero .mark{ font-size:40px; }
-  .hero h1{ font-size:22px; margin:8px 0 2px; }
-  .hero p{ color:var(--ink-soft); font-size:14px; margin:0; }
+  .hero{ text-align:center; padding:24px 8px 10px; }
+  .hero .mark{ font-size:36px; }
+  .hero h1{ font-size:20px; margin:10px 0 2px; }
+  .hero p{ color:var(--ink-soft); font-size:13px; margin:0; font-family:"JetBrains Mono",monospace; }
   .cta-grid{ display:flex; flex-direction:column; gap:12px; margin-top:20px; }
   .cta{
     background:var(--surface); border:1px solid var(--border); border-radius:var(--radius);
     padding:20px; display:flex; align-items:center; gap:14px; box-shadow:var(--shadow); cursor:pointer;
+    border-left:4px solid var(--primary);
   }
-  .cta .ico{ font-size:26px; width:44px; text-align:center; }
-  .cta .txt strong{ display:block; font-size:16px; }
-  .cta .txt span{ font-size:13px; color:var(--ink-soft); }
+  .cta .ico{ font-size:24px; width:40px; text-align:center; }
+  .cta .txt strong{ display:block; font-size:15px; }
+  .cta .txt span{ font-size:12px; color:var(--ink-soft); }
   .cta:active{ transform:scale(.98); }
 
   /* ---------- 進度指示（新增報修） ---------- */
   .steps{ display:flex; gap:6px; margin:2px 0 18px; }
-  .steps i{ flex:1; height:5px; border-radius:99px; background:var(--border); }
+  .steps i{ flex:1; height:4px; border-radius:2px; background:var(--border); }
   .steps i.done{ background:var(--primary); }
 
-  /* ---------- 案件票券樣式（signature element） ---------- */
+  /* ---------- 案件工單樣式（signature element：藍圖角括號） ---------- */
   .ticket{
-    background:var(--surface); border-radius:var(--radius); overflow:hidden;
+    background:var(--surface); border-radius:6px;
     box-shadow:var(--shadow); margin-bottom:12px; position:relative; border:1px solid var(--border);
   }
-  .ticket::before{
-    content:""; position:absolute; left:0; top:0; bottom:0; width:6px;
+  .ticket-body{ padding:16px 18px 14px; position:relative; }
+  .ticket-body::before, .ticket-body::after{
+    content:""; position:absolute; width:10px; height:10px; border:2px solid var(--border);
   }
-  .ticket[data-urgency="urgent"]::before{ background:var(--urgent); }
-  .ticket[data-urgency="operational"]::before{ background:var(--warn); }
-  .ticket[data-urgency="normal"]::before{ background:var(--normal); }
-  .ticket-body{ padding:16px 16px 14px 20px; }
-  .ticket-top{ display:flex; justify-content:space-between; align-items:flex-start; gap:8px; }
-  .ticket-no{ font-family:monospace; font-size:12px; color:var(--ink-soft); letter-spacing:.5px; }
-  .ticket-title{ font-size:16px; font-weight:700; margin:4px 0 2px; }
-  .ticket-sub{ font-size:13px; color:var(--ink-soft); }
+  .ticket-body::before{ top:6px; left:6px; border-right:none; border-bottom:none; }
+  .ticket-body::after{ bottom:6px; right:6px; border-left:none; border-top:none; }
+  .ticket[data-urgency="urgent"] .ticket-body::before, .ticket[data-urgency="urgent"] .ticket-body::after{ border-color:var(--urgent); }
+  .ticket[data-urgency="operational"] .ticket-body::before, .ticket[data-urgency="operational"] .ticket-body::after{ border-color:var(--warn); }
+  .ticket[data-urgency="normal"] .ticket-body::before, .ticket[data-urgency="normal"] .ticket-body::after{ border-color:var(--normal); }
+  .ticket-top{ display:flex; justify-content:space-between; align-items:flex-start; gap:8px; padding:0 6px; }
+  .ticket-no{ font-family:"JetBrains Mono",monospace; font-size:11px; color:var(--ink-soft); letter-spacing:.5px; }
+  .ticket-title{ font-size:15px; font-weight:700; margin:4px 0 2px; }
+  .ticket-sub{ font-size:12px; color:var(--ink-soft); }
   .status-pill{
-    font-size:12px; font-weight:700; padding:5px 10px; border-radius:999px;
+    font-size:11px; font-weight:700; padding:5px 10px; border-radius:6px;
     background:var(--chip-bg); color:var(--ink-soft); white-space:nowrap;
+    font-family:"JetBrains Mono",monospace;
   }
-  .status-pill[data-active="true"]{ background:#EAF2ED; color:var(--primary); }
+  .status-pill[data-active="true"]{ background:#E3EEF3; color:var(--primary); }
   .repeat-flag{
-    margin-top:10px; font-size:12px; font-weight:700; color:var(--urgent);
-    background:#FBEAE2; display:inline-block; padding:5px 10px; border-radius:8px;
+    margin:10px 6px 0; font-size:11px; font-weight:700; color:var(--urgent);
+    background:#FBE7E5; display:inline-block; padding:5px 10px; border-radius:6px;
+    font-family:"JetBrains Mono",monospace;
   }
 
   /* ---------- 照片上傳格 ---------- */
   .upload-grid{ display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin-top:6px; }
   .upload-slot{
-    aspect-ratio:1; border-radius:10px; border:1.5px dashed var(--border);
+    aspect-ratio:1; border-radius:6px; border:1.5px dashed var(--border);
     display:flex; align-items:center; justify-content:center; color:var(--ink-soft);
-    font-size:22px; background:#FCFAF6; cursor:pointer; overflow:hidden;
+    font-size:22px; background:#F7FAFC; cursor:pointer; overflow:hidden;
   }
   .upload-slot img{ width:100%; height:100%; object-fit:cover; }
 
@@ -145,16 +159,16 @@
   .footer-actions .inner{ max-width:480px; margin:0 auto; }
 
   .empty{ text-align:center; padding:50px 10px; color:var(--ink-soft); }
-  .empty .mark{ font-size:34px; display:block; margin-bottom:10px; }
+  .empty .mark{ font-size:32px; display:block; margin-bottom:10px; }
 
   .banner{
-    background:#FBEAE2; color:var(--urgent); border-radius:12px; padding:12px 14px;
+    background:#FBE7E5; color:var(--urgent); border-radius:8px; padding:12px 14px;
     font-size:13px; font-weight:700; margin-bottom:14px;
   }
   .success-wrap{ text-align:center; padding:50px 10px 10px; }
-  .success-wrap .mark{ font-size:56px; }
+  .success-wrap .mark{ font-size:48px; }
   .success-wrap h2{ margin:10px 0 4px; }
-  .success-wrap .no{ font-family:monospace; color:var(--ink-soft); font-size:14px; }
+  .success-wrap .no{ font-family:"JetBrains Mono",monospace; color:var(--ink-soft); font-size:14px; }
 
   .hidden{ display:none !important; }
   .filter-row{ display:flex; gap:8px; overflow-x:auto; padding-bottom:4px; margin-bottom:14px; }
@@ -162,15 +176,16 @@
 
   /* ---------- 登入頁 ---------- */
   .login-wrap{ min-height:100vh; display:flex; flex-direction:column; justify-content:center; padding:30px 24px; }
-  .login-mark{ text-align:center; font-size:44px; margin-bottom:6px; }
-  .login-title{ text-align:center; font-size:20px; font-weight:700; margin:0 0 30px; }
+  .login-mark{ text-align:center; font-size:38px; margin-bottom:6px; }
+  .login-title{ text-align:center; font-size:18px; font-weight:700; margin:0 0 6px; }
+  .login-tag{ text-align:center; font-size:11px; color:var(--ink-soft); font-family:"JetBrains Mono",monospace; margin:0 0 28px; letter-spacing:.08em; text-transform:uppercase; }
   .error-msg{
-    background:#FBEAE2; color:var(--urgent); font-size:13px; font-weight:600;
-    padding:10px 14px; border-radius:10px; margin-top:10px;
+    background:#FBE7E5; color:var(--urgent); font-size:13px; font-weight:600;
+    padding:10px 14px; border-radius:6px; margin-top:10px;
   }
   .login-switch{ text-align:center; margin-top:18px; font-size:13px; color:var(--ink-soft); }
   .login-switch a{ color:var(--primary); font-weight:700; text-decoration:none; cursor:pointer; }
-  .logout-link{ font-size:13px; color:var(--ink-soft); cursor:pointer; text-decoration:underline; }
+  .logout-link{ font-size:12px; color:var(--ink-soft); cursor:pointer; text-decoration:underline; font-family:"JetBrains Mono",monospace; }
   .top-right{ margin-left:auto; }
 </style>
 </head>
@@ -288,8 +303,9 @@ function configWarning(){
 function renderLogin(){
   return `
   <div class="login-wrap">
-    <div class="login-mark">🍱</div>
-    <h1 class="login-title">總務報修系統｜門市端</h1>
+    <div class="login-mark">🔧</div>
+    <h1 class="login-title">總務報修系統</h1>
+    <p class="login-tag">Facility &amp; Repair Ops · 門市端</p>
     <label class="field-label">Email</label>
     <input type="email" id="login-email" placeholder="you@example.com">
     <label class="field-label">密碼</label>
@@ -307,7 +323,7 @@ function renderSignup(){
   const storeOptions = state.stores.map(s=>`<option value="${s.id}">${s.name}</option>`).join("");
   return `
   <div class="login-wrap">
-    <div class="login-mark">📝</div>
+    <div class="login-mark">🧾</div>
     <h1 class="login-title">申請門市帳號</h1>
     <label class="field-label">姓名</label>
     <input type="text" id="signup-name" placeholder="您的姓名">
@@ -332,7 +348,7 @@ function renderSignup(){
 function renderProfileMissing(){
   return `
   <div class="login-wrap">
-    <div class="login-mark">⏳</div>
+    <div class="login-mark">⚙️</div>
     <h1 class="login-title">帳號待啟用</h1>
     <p style="text-align:center; color:var(--ink-soft); font-size:14px; line-height:1.7;">
       您的帳號已建立，但尚未由系統管理者指派門市與角色。<br>請聯繫總務協助開通後再登入。
@@ -344,20 +360,20 @@ function renderProfileMissing(){
 }
 function renderHome(){
   return `
-  <header class="topbar"><h1>🍱 總務報修系統</h1><span class="top-right logout-link" data-action="do-logout">登出</span></header>
+  <header class="topbar"><h1>🔧 總務報修系統</h1><span class="top-right logout-link" data-action="do-logout">LOGOUT</span></header>
   <main>
     <div class="hero">
       <div class="mark">🛠️</div>
       <h1>${state.storeName || "門市"}</h1>
-      <p>設備壞了嗎？幾個步驟就能送出報修</p>
+      <p>FACILITY REPORTING SYSTEM</p>
     </div>
     <div class="cta-grid">
       <div class="cta" data-action="go-new-report">
-        <div class="ico">📋</div>
+        <div class="ico">🧰</div>
         <div class="txt"><strong>新增報修</strong><span>設備故障、水電、環境問題</span></div>
       </div>
       <div class="cta" data-action="go-my-cases">
-        <div class="ico">📂</div>
+        <div class="ico">📁</div>
         <div class="txt"><strong>我的案件</strong><span>查看進度、補件、確認完修</span></div>
       </div>
     </div>
