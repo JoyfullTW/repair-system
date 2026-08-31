@@ -325,7 +325,7 @@ function renderLogin(){
 
 /* ---------------- 申請帳號 ---------------- */
 function renderSignup(){
-  const storeOptions = state.stores.map(s=>`<option value="${s.id}">${s.name}</option>`).join("");
+  const storeOptions = state.stores.map(s=>`<option value="${s.id}">${s.code ? '['+s.code+'] ' : ''}${s.name}</option>`).join("");
   return `
   <div class="login-wrap">
     <div class="login-mark">🧾</div>
@@ -395,7 +395,7 @@ function renderNewReport(){
   let body = "";
   if(s.step === 1){
     const needsStorePicker = !state.storeId; // 總務/管理者等未綁定固定門市的帳號
-    const storeOptions = state.stores.map(st=>`<option value="${st.id}" ${s.selectedStoreId===st.id?'selected':''}>${st.name}</option>`).join("");
+    const storeOptions = state.stores.map(st=>`<option value="${st.id}" ${s.selectedStoreId===st.id?'selected':''}>${st.code ? '['+st.code+'] ' : ''}${st.name}</option>`).join("");
     const typeCardsDisabled = needsStorePicker && !s.selectedStoreId;
     body = `
       ${needsStorePicker ? `
@@ -467,7 +467,8 @@ function renderNewReport(){
       </div>
       <div class="card" style="margin-top:20px;">
         <strong style="font-size:14px;">送出前確認</strong>
-        <p style="font-size:13px; color:var(--ink-soft); margin:8px 0 2px;">類型：${s.repairType==='asset'?('資產：'+(s.assetLabel||'—')):('一般報修：'+(s.generalCategory||'—'))}</p>
+        <p style="font-size:13px; color:var(--ink-soft); margin:8px 0 2px;">所屬門市：${state.storeName || (state.stores.find(st=>st.id===s.selectedStoreId)||{}).name || '—'}</p>
+        <p style="font-size:13px; color:var(--ink-soft); margin:2px 0;">類型：${s.repairType==='asset'?('資產：'+(s.assetLabel||'—')):('一般報修：'+(s.generalCategory||'—'))}</p>
         <p style="font-size:13px; color:var(--ink-soft); margin:2px 0;">報告日期：${s.reportDate||'—'}</p>
         <p style="font-size:13px; color:var(--ink-soft); margin:2px 0;">報修設備：${s.faultCategory||'—'}</p>
         <p style="font-size:13px; color:var(--ink-soft); margin:2px 0;">報修原因：${s.faultReason||'—'}</p>
@@ -476,6 +477,11 @@ function renderNewReport(){
       </div>`;
   }
 
+  // 代表門市持續提示：非固定門市帳號在步驟 1 之後，每一步都能看到目前選的是哪間門市，避免選錯後忘記
+  const storeBanner = (!state.storeId && s.selectedStoreId)
+    ? `<div class="banner" style="background:var(--chip-bg); color:var(--ink); font-weight:700;">🏬 代表門市：${(state.stores.find(st=>st.id===s.selectedStoreId)||{}).name || ''}</div>`
+    : "";
+
   return `
   <header class="topbar">
     <span class="back" data-action="report-back">‹</span>
@@ -483,6 +489,7 @@ function renderNewReport(){
   </header>
   <main>
     <div class="steps">${stepDots}</div>
+    ${s.step > 1 ? storeBanner : ""}
     ${body}
   </main>
   <div class="footer-actions"><div class="inner">
@@ -910,7 +917,7 @@ async function doLogin(){
 }
 
 async function loadStoresForSignup(){
-  const { data, error } = await sb.from("stores").select("id, name").eq("status","active").order("name");
+  const { data, error } = await sb.from("stores").select("id, name, code").eq("status","active").order("code");
   if(!error) state.stores = data || [];
 }
 
