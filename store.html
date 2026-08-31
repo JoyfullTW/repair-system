@@ -266,6 +266,7 @@ let state = {
                reporterName:"", reporterPhone:"", urgency:null, photos:[] },
   cases: [],
   currentCase: null,
+  caseUploadMarks: {},
 };
 
 const app = document.getElementById("app");
@@ -444,7 +445,12 @@ function renderNewReport(){
       <h2 style="margin:4px 0 6px;">上傳照片／影片</h2>
       <p style="font-size:13px; color:var(--ink-soft); margin:0 0 4px;">影片限 30 秒內，最多 5 個檔案</p>
       <div class="upload-grid">
-        ${[0,1,2,3,4].map(i=>`<div class="upload-slot" data-action="upload-slot" data-index="${i}">${s.photos[i]?'✅':'＋'}</div>`).join("")}
+        ${[0,1,2,3,4].map(i=>{
+          const f = s.photos[i];
+          if(!f) return `<div class="upload-slot" data-action="upload-slot" data-index="${i}">＋</div>`;
+          const inner = f.type.startsWith("video") ? "🎬" : `<img src="${f._previewUrl}">`;
+          return `<div class="upload-slot" data-action="upload-slot" data-index="${i}">${inner}</div>`;
+        }).join("")}
       </div>
       <div class="card" style="margin-top:20px;">
         <strong style="font-size:14px;">送出前確認</strong>
@@ -531,14 +537,14 @@ function renderCaseDetail(){
       <div class="card">
         <strong>📎 需要補充資料</strong>
         <p style="font-size:13px; color:var(--ink-soft);">總務標記此案件需要補件，請上傳所需的照片或說明。</p>
-        <div class="upload-grid">${[0,1,2].map(i=>`<div class="upload-slot" data-action="upload-supplement" data-index="${i}">＋</div>`).join("")}</div>
+        <div class="upload-grid">${[0,1,2].map(i=>`<div class="upload-slot" data-action="upload-supplement" data-index="${i}">${state.caseUploadMarks[`supplement-${i}`]?'✅':'＋'}</div>`).join("")}</div>
       </div>`;
   } else if(c.status === "pending_store_confirm"){
     actionArea = `
       <div class="card">
         <strong>✅ 請確認維修結果</strong>
         <p style="font-size:13px; color:var(--ink-soft);">請上傳維修後照片，並確認設備是否恢復正常。</p>
-        <div class="upload-grid">${[0,1,2].map(i=>`<div class="upload-slot" data-action="upload-after" data-index="${i}">＋</div>`).join("")}</div>
+        <div class="upload-grid">${[0,1,2].map(i=>`<div class="upload-slot" data-action="upload-after" data-index="${i}">${state.caseUploadMarks[`after-${i}`]?'✅':'＋'}</div>`).join("")}</div>
         <div style="display:flex; gap:10px; margin-top:14px;">
           <button class="btn btn-primary" data-action="confirm-result" data-value="normal">正常，可以結案</button>
         </div>
@@ -577,6 +583,88 @@ function bindEvents(){
   if(search) search.addEventListener("input", onAssetSearch);
 }
 
+/* ============================================================
+   照片／影片上傳（Supabase Storage）
+   ============================================================ */
+const fileInput = document.createElement("input");
+fileInput.type = "file";
+fileInput.accept = "image/*,video/*";
+fileInput.style.display = "none";
+document.body.appendChild(fileInput);
+let fileTarget = null; // { mode:'new-report'|'case-upload', index, caseId, category, markKey }
+
+fileInput.addEventListener("change", async (e)=>{
+  const file = e.target.files[0];
+  fileInput.value = "";
+  const target = fileTarget;
+  fileTarget = null;
+  if(!file || !target) return;
+
+  if(file.size > 50 * 1024 * 1024){
+    alert("檔案過大（超過 50MB），請重新拍攝或選擇較小的檔案");
+    return;
+  }
+
+  try{
+    if(file.type.startsWith("video")){
+      await checkVideoDuration(file);
+    }
+  }catch(err){
+    alert(err.message);
+    return;
+  }
+
+  if(target.mode === "new-report"){
+    if(file.type.startsWith("image")){
+      file._previewUrl = URL.createObjectURL(file);
+    }
+    state.newReport.photos[target.index] = file;
+    render();
+  }else if(target.mode === "case-upload"){
+    try{
+      await uploadAttachment(target.caseId, file, target.category);
+      state.caseUploadMarks[`${target.markKey}-${target.index}`] = true;
+      render();
+    }catch(err){
+      alert("上傳失敗：" + err.message);
+    }
+  }
+});
+
+function checkVideoDuration(file){
+  return new Promise((resolve, reject)=>{
+    if(!file.type.startsWith("video")){ resolve(true); return; }
+    const video = document.createElement("video");
+    video.preload = "metadata";
+    video.onloadedmetadata = () => {
+      URL.revokeObjectURL(video.src);
+      if(video.duration > 30){
+        reject(new Error("影片長度超過 30 秒，請重新拍攝或剪輯後再上傳"));
+      }else{
+        resolve(true);
+      }
+    };
+    video.onerror = () => resolve(true); // 無法判斷長度時，先放行，不擋住使用者
+    video.src = URL.createObjectURL(file);
+  });
+}
+
+async function uploadAttachment(caseId, file, category){
+  const ext = (file.name.split(".").pop() || "dat").toLowerCase();
+  const path = `case-photos/${caseId}/${Date.now()}-${Math.random().toString(36).slice(2,7)}.${ext}`;
+  const { error: upErr } = await sb.storage.from("attachments").upload(path, file);
+  if(upErr) throw upErr;
+  const { data: urlData } = sb.storage.from("attachments").getPublicUrl(path);
+  const { error: insErr } = await sb.from("attachments").insert({
+    related_type: "case",
+    related_id: caseId,
+    category,
+    file_path: urlData.publicUrl,
+    uploaded_by: state.profile?.id || null
+  });
+  if(insErr) throw insErr;
+}
+
 async function onAction(e){
   const el = e.currentTarget;
   const action = el.dataset.action;
@@ -597,7 +685,18 @@ async function onAction(e){
   else if(action === "report-submit"){ await submitReport(); }
   else if(action === "open-case"){ await openCase(el.dataset.id); }
   else if(action === "confirm-result"){ await confirmCaseResult(el.dataset.value); }
-  else if(action === "upload-slot"){ alert("照片上傳串接 Supabase Storage：可依附件6分類（故障照片/影片、回執單等）擴充實際上傳邏輯。"); }
+  else if(action === "upload-slot"){
+    fileTarget = { mode:"new-report", index: Number(el.dataset.index) };
+    fileInput.click();
+  }
+  else if(action === "upload-supplement"){
+    fileTarget = { mode:"case-upload", index: Number(el.dataset.index), caseId: state.currentCase.id, category:"other", markKey:"supplement" };
+    fileInput.click();
+  }
+  else if(action === "upload-after"){
+    fileTarget = { mode:"case-upload", index: Number(el.dataset.index), caseId: state.currentCase.id, category:"after_repair_photo", markKey:"after" };
+    fileInput.click();
+  }
 }
 
 function resetNewReport(){
@@ -669,10 +768,8 @@ function onAssetSearch(e){
 
 async function submitReport(){
   const s = state.newReport;
-  const caseNo = "TMP-" + Date.now().toString().slice(-8); // 正式編號規則於後端 trigger 產生
 
   const payload = {
-    case_no: caseNo,
     store_id: state.storeId,
     repair_type: s.repairType,
     asset_id: s.repairType === "asset" ? s.assetId : null,
@@ -690,6 +787,18 @@ async function submitReport(){
 
   const { data, error } = await sb.from("cases").insert(payload).select().single();
   if(error){ alert("送出失敗：" + error.message); return; }
+
+  const photosToUpload = s.photos.filter(Boolean);
+  if(photosToUpload.length > 0){
+    for(const file of photosToUpload){
+      try{
+        await uploadAttachment(data.id, file, "fault_photo_video");
+      }catch(err){
+        alert(`案件已建立（#${data.case_no}），但其中一個檔案上傳失敗：${err.message}`);
+      }
+    }
+  }
+
   state.currentCase = data;
   state.view = "new-report-success";
   render();
@@ -708,6 +817,7 @@ async function openCase(id){
   const { data, error } = await sb.from("cases").select("*, assets(name)").eq("id", id).single();
   if(error){ alert("載入失敗：" + error.message); return; }
   state.currentCase = { ...data, asset_name: data.assets?.name || "" };
+  state.caseUploadMarks = {};
   state.view = "case-detail";
   render();
   loadCaseTimeline(id);
