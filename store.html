@@ -600,6 +600,21 @@ function bindEvents(){
     state.newReport.selectedStoreId = e.target.value || null;
     render();
   });
+
+  // 新增報修步驟3的欄位：打字當下就即時同步進 state，避免中途重新渲染（例如點選緊急程度）時資料遺失
+  const fieldMap = {
+    "report-date": "reportDate",
+    "fault-category": "faultCategory",
+    "fault-reason": "faultReason",
+    "suspected-cause": "suspectedCause",
+    "fault-desc": "faultDescription",
+    "reporter-name": "reporterName",
+    "reporter-phone": "reporterPhone"
+  };
+  Object.keys(fieldMap).forEach(id=>{
+    const el = document.getElementById(id);
+    if(el) el.addEventListener("input", ()=>{ state.newReport[fieldMap[id]] = el.value; });
+  });
 }
 
 /* ============================================================
