@@ -175,7 +175,11 @@
 </style>
 </head>
 <body>
-<div id="app"></div>
+<div id="app">
+  <div style="padding:60px 24px; text-align:center; color:#7A6F63; font-family:sans-serif; font-size:14px;">
+    載入中…如果這段文字一直沒有消失，代表網頁程式無法執行，請截圖回報。
+  </div>
+</div>
 
 <script>
 /* ============================================================
@@ -185,9 +189,18 @@
 const SUPABASE_URL = "https://qvhwwrmduqdjgnuszqvs.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_No3AgE0uvJ_S6OSP3bUePA_zLIIIEXW";
 
-const supabase = (SUPABASE_URL.startsWith("http"))
-  ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
-  : null;
+let supabase = null;
+let initError = "";
+try{
+  if(!window.supabase){
+    throw new Error("Supabase JS 函式庫未載入成功（window.supabase 不存在），可能是 CDN 連線被擋，或網路異常。");
+  }
+  if(SUPABASE_URL.startsWith("http")){
+    supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+  }
+}catch(e){
+  initError = e.message || String(e);
+}
 
 /* ============================================================
    簡易狀態與畫面路由（單頁應用，比照既有訂購系統的做法）
@@ -239,13 +252,14 @@ function configWarning(){
   return `
   <main style="padding:40px 24px;">
     <div class="card">
-      <h2>⚙️ 尚未設定 Supabase 連線</h2>
+      <h2>⚙️ 尚未設定 Supabase 連線 / 載入發生問題</h2>
       <p style="color:var(--ink-soft); font-size:14px; line-height:1.7;">
         請打開 store.html 檔案，找到最上方的
         <code>SUPABASE_URL</code> 與 <code>SUPABASE_ANON_KEY</code>，
         換成你自己 Supabase 專案的設定值（在 Supabase 後台 Settings → API 可以找到），
         存檔後重新整理頁面即可。
       </p>
+      ${initError ? `<div class="error-msg" style="margin-top:14px;">錯誤細節：${initError}</div>` : ""}
     </div>
   </main>`;
 }
@@ -734,10 +748,27 @@ async function loadProfileAndEnter(){
    初始化
    ============================================================ */
 async function init(){
-  if(!supabase){ render(); return; }
-  const { data: { session } } = await supabase.auth.getSession();
-  if(session){ await loadProfileAndEnter(); }
-  else { state.view = "login"; render(); }
+  try{
+    if(!supabase){ render(); return; }
+    const { data: { session } } = await supabase.auth.getSession();
+    if(session){ await loadProfileAndEnter(); }
+    else { state.view = "login"; render(); }
+  }catch(err){
+    app.innerHTML = `
+      <main style="padding:40px 24px;">
+        <div class="card">
+          <h2>⚠️ 載入時發生錯誤</h2>
+          <p style="color:var(--ink-soft); font-size:13px; line-height:1.7;">
+            ${err.message || err}
+          </p>
+          <p style="color:var(--ink-soft); font-size:13px; line-height:1.7; margin-top:10px;">
+            若你是用「直接雙擊開啟檔案（file://）」的方式打開這個頁面，
+            部分瀏覽器（尤其 Safari）會封鎖與 Supabase 的連線。
+            請改成上傳到 GitHub Pages 後用網址開啟。
+          </p>
+        </div>
+      </main>`;
+  }
 }
 
 init();
