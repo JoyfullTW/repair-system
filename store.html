@@ -189,6 +189,26 @@
 const SUPABASE_URL = "https://qvhwwrmduqdjgnuszqvs.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_No3AgE0uvJ_S6OSP3bUePA_zLIIIEXW";
 
+window.addEventListener("error", function(e){
+  document.getElementById("app").innerHTML = `
+    <main style="padding:40px 24px;">
+      <div class="card">
+        <h2>⚠️ 網頁執行時發生錯誤</h2>
+        <p style="color:var(--ink-soft); font-size:13px; line-height:1.7;">${e.message}</p>
+        <p style="color:var(--ink-soft); font-size:12px; margin-top:8px;">位置：${e.filename}:${e.lineno}</p>
+      </div>
+    </main>`;
+});
+window.addEventListener("unhandledrejection", function(e){
+  document.getElementById("app").innerHTML = `
+    <main style="padding:40px 24px;">
+      <div class="card">
+        <h2>⚠️ 連線時發生未預期的錯誤</h2>
+        <p style="color:var(--ink-soft); font-size:13px; line-height:1.7;">${e.reason?.message || e.reason}</p>
+      </div>
+    </main>`;
+});
+
 let supabase = null;
 let initError = "";
 try{
@@ -750,7 +770,16 @@ async function loadProfileAndEnter(){
 async function init(){
   try{
     if(!supabase){ render(); return; }
-    const { data: { session } } = await supabase.auth.getSession();
+
+    const timeout = (ms) => new Promise((_, reject) =>
+      setTimeout(() => reject(new Error(`連線逾時（超過 ${ms/1000} 秒沒有回應），請檢查網路，或確認 Supabase 專案的 URL / Key 是否正確。`)), ms)
+    );
+
+    const { data: { session } } = await Promise.race([
+      supabase.auth.getSession(),
+      timeout(8000)
+    ]);
+
     if(session){ await loadProfileAndEnter(); }
     else { state.view = "login"; render(); }
   }catch(err){
