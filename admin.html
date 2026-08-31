@@ -1,0 +1,930 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>總務報修系統｜總務端</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=JetBrains+Mono:wght@500;700&family=Noto+Sans+TC:wght@400;500;700;900&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  :root{
+    --bg:#EEF2F6;
+    --grid:rgba(27,42,65,.05);
+    --surface:#FFFFFF;
+    --ink:#1B2A41;
+    --ink-soft:#5C6B7C;
+    --border:#D2DCE6;
+    --primary:#2C6E8E;
+    --primary-ink:#FFFFFF;
+    --urgent:#D93B30;
+    --warn:#E2941A;
+    --normal:#5C7A99;
+    --ok:#2C6E8E;
+    --chip-bg:#E4EAF0;
+    --sidebar-w:220px;
+    --radius:10px;
+    --shadow: 0 1px 2px rgba(27,42,65,.06), 0 6px 18px rgba(27,42,65,.08);
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0; color:var(--ink);
+    font-family:"Noto Sans TC","Space Grotesk",sans-serif;
+    background-color:var(--bg);
+    background-image:
+      linear-gradient(var(--grid) 1px, transparent 1px),
+      linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+    background-size: 24px 24px;
+  }
+  h1,h2,h3{ font-family:"Space Grotesk","Noto Sans TC",sans-serif; letter-spacing:-.01em; margin:0; }
+  .mono{ font-family:"JetBrains Mono",monospace; }
+  a{ color:inherit; }
+
+  #app{ min-height:100vh; }
+  .shell{ display:flex; min-height:100vh; }
+  .sidebar{
+    width:var(--sidebar-w); flex-shrink:0; background:var(--surface); border-right:1px solid var(--border);
+    padding:22px 14px; display:flex; flex-direction:column; gap:4px;
+  }
+  .sidebar .brand{ font-size:16px; font-weight:700; padding:0 10px 20px; display:flex; align-items:center; gap:8px; }
+  .nav-item{
+    padding:11px 12px; border-radius:8px; font-size:14px; font-weight:700; color:var(--ink-soft);
+    cursor:pointer; display:flex; align-items:center; gap:10px;
+  }
+  .nav-item:hover{ background:var(--chip-bg); }
+  .nav-item[data-active="true"]{ background:var(--primary); color:#fff; }
+  .sidebar .spacer{ flex:1; }
+  .sidebar .who{ font-size:12px; color:var(--ink-soft); padding:10px 12px; border-top:1px solid var(--border); margin-top:8px; }
+  .sidebar .who b{ display:block; color:var(--ink); font-size:13px; }
+  .logout-link{ font-size:12px; color:var(--primary); cursor:pointer; text-decoration:underline; font-family:"JetBrains Mono",monospace; }
+
+  .main-col{ flex:1; min-width:0; display:flex; flex-direction:column; }
+  .topbar{
+    background:var(--surface); border-bottom:1px solid var(--border); padding:16px 28px;
+    display:flex; align-items:center; gap:14px; position:sticky; top:0; z-index:5;
+  }
+  .topbar h1{ font-size:19px; }
+  .topbar .back{ cursor:pointer; font-size:15px; color:var(--ink-soft); font-weight:700; }
+  .content{ padding:24px 28px 60px; max-width:1100px; }
+
+  @media (max-width: 860px){
+    .shell{ flex-direction:column; }
+    .sidebar{ width:100%; flex-direction:row; overflow-x:auto; padding:10px 14px; align-items:center; }
+    .sidebar .brand{ padding:0 10px 0 0; }
+    .sidebar .spacer{ display:none; }
+    .sidebar .who{ display:none; }
+    .content{ padding:18px 16px 60px; }
+  }
+
+  .card{ background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); padding:18px; box-shadow:var(--shadow); }
+  .grid{ display:grid; gap:14px; }
+  .grid-4{ grid-template-columns:repeat(4,1fr); }
+  .grid-3{ grid-template-columns:repeat(3,1fr); }
+  .grid-2{ grid-template-columns:repeat(2,1fr); }
+  @media (max-width:760px){ .grid-4,.grid-3,.grid-2{ grid-template-columns:1fr 1fr; } }
+  @media (max-width:480px){ .grid-4,.grid-3,.grid-2{ grid-template-columns:1fr; } }
+
+  .stat-card{ padding:16px 18px; cursor:pointer; }
+  .stat-card .n{ font-size:28px; font-weight:700; font-family:"JetBrains Mono",monospace; }
+  .stat-card .label{ font-size:12px; color:var(--ink-soft); margin-top:2px; }
+  .stat-card[data-tone="urgent"] .n{ color:var(--urgent); }
+  .stat-card[data-tone="warn"] .n{ color:var(--warn); }
+
+  .btn{ display:inline-flex; align-items:center; justify-content:center; gap:8px; padding:10px 16px; border-radius:8px; border:none; font-size:14px; font-weight:700; cursor:pointer; font-family:inherit; }
+  .btn-primary{ background:var(--primary); color:#fff; }
+  .btn-outline{ background:var(--surface); color:var(--ink); border:1.5px solid var(--border); }
+  .btn-danger{ background:var(--urgent); color:#fff; }
+  .btn-sm{ padding:6px 12px; font-size:12px; }
+  .btn:disabled{ opacity:.4; cursor:not-allowed; }
+
+  label.field-label{ display:block; font-size:11px; font-weight:700; color:var(--ink-soft); margin:14px 0 5px; text-transform:uppercase; letter-spacing:.05em; }
+  label.field-label:first-child{ margin-top:0; }
+  input[type=text], input[type=email], input[type=password], input[type=date], input[type=number], select, textarea{
+    width:100%; padding:10px 12px; border-radius:7px; border:1.5px solid var(--border);
+    font-size:14px; font-family:inherit; color:var(--ink); background:var(--surface);
+  }
+  textarea{ min-height:70px; resize:vertical; }
+  input:focus, select:focus, textarea:focus{ outline:2px solid var(--primary); outline-offset:1px; }
+  .checkbox-row{ display:flex; align-items:center; gap:8px; margin:10px 0; font-size:13px; }
+  .checkbox-row input{ width:auto; }
+
+  table{ width:100%; border-collapse:collapse; font-size:13px; }
+  th{ text-align:left; padding:9px 10px; color:var(--ink-soft); font-size:11px; text-transform:uppercase; letter-spacing:.04em; border-bottom:1.5px solid var(--border); }
+  td{ padding:11px 10px; border-bottom:1px solid var(--border); vertical-align:middle; }
+  tr.row-clickable{ cursor:pointer; }
+  tr.row-clickable:hover{ background:var(--chip-bg); }
+  .case-no{ font-family:"JetBrains Mono",monospace; font-size:12px; color:var(--ink-soft); }
+
+  .status-pill{ font-size:11px; font-weight:700; padding:4px 9px; border-radius:6px; background:var(--chip-bg); color:var(--ink-soft); white-space:nowrap; font-family:"JetBrains Mono",monospace; display:inline-block; }
+  .status-pill[data-urgency="urgent"]{ background:#FBE7E5; color:var(--urgent); }
+  .status-pill[data-urgency="operational"]{ background:#FBF0DD; color:var(--warn); }
+  .status-pill[data-urgency="normal"]{ background:#E6ECF1; color:var(--normal); }
+  .repeat-badge{ font-size:11px; font-weight:700; color:var(--urgent); background:#FBE7E5; padding:3px 8px; border-radius:6px; }
+
+  .filter-bar{ display:flex; gap:10px; flex-wrap:wrap; margin-bottom:16px; }
+  .filter-bar select, .filter-bar input{ width:auto; min-width:140px; }
+
+  .section-title{ font-size:13px; font-weight:700; color:var(--ink-soft); text-transform:uppercase; letter-spacing:.05em; margin:26px 0 10px; }
+  .section-title:first-child{ margin-top:0; }
+
+  .attach-grid{ display:grid; grid-template-columns:repeat(auto-fill, minmax(110px,1fr)); gap:10px; }
+  .attach-item{ border:1px solid var(--border); border-radius:8px; overflow:hidden; background:#F7FAFC; }
+  .attach-item img{ width:100%; height:80px; object-fit:cover; display:block; }
+  .attach-item .cap{ font-size:10px; color:var(--ink-soft); padding:5px 6px; }
+  .attach-upload-btn{ border:1.5px dashed var(--border); border-radius:8px; height:100px; display:flex; align-items:center; justify-content:center; font-size:12px; color:var(--ink-soft); cursor:pointer; text-align:center; padding:6px; }
+
+  .timeline-item{ font-size:12px; color:var(--ink-soft); padding:8px 0; border-bottom:1px dashed var(--border); }
+  .timeline-item:last-child{ border-bottom:none; }
+  .timeline-item .t{ font-family:"JetBrains Mono",monospace; font-size:11px; }
+
+  .empty{ text-align:center; padding:60px 10px; color:var(--ink-soft); }
+  .error-msg{ background:#FBE7E5; color:var(--urgent); font-size:13px; font-weight:600; padding:10px 14px; border-radius:6px; margin-top:10px; }
+  .success-msg{ background:#E3EEF3; color:var(--primary); font-size:13px; font-weight:600; padding:10px 14px; border-radius:6px; margin-top:10px; }
+
+  .login-wrap{ min-height:100vh; display:flex; flex-direction:column; justify-content:center; align-items:center; padding:30px; }
+  .login-box{ width:100%; max-width:380px; }
+  .login-mark{ text-align:center; font-size:38px; margin-bottom:6px; }
+  .login-title{ text-align:center; font-size:18px; font-weight:700; margin:0 0 4px; }
+  .login-tag{ text-align:center; font-size:11px; color:var(--ink-soft); font-family:"JetBrains Mono",monospace; margin:0 0 26px; letter-spacing:.08em; text-transform:uppercase; }
+
+  .badge-pending{ background:var(--warn); color:#fff; font-size:10px; font-weight:700; padding:2px 7px; border-radius:5px; }
+  .hidden{ display:none !important; }
+</style>
+</head>
+<body>
+<div id="app"></div>
+
+<script>
+/* ============================================================
+   Supabase 設定 — 與 store.html 共用同一組專案設定
+   ============================================================ */
+const SUPABASE_URL = "https://qvhwwrmduqdjgnuszqvs.supabase.co";
+const SUPABASE_ANON_KEY = "sb_publishable_No3AgE0uvJ_S6OSP3bUePA_zLIIIEXW";
+
+window.addEventListener("error", function(e){
+  const el = document.getElementById("app");
+  if(el) el.innerHTML = `<div style="padding:40px;"><div class="card"><h2>⚠️ 發生錯誤</h2><p style="color:var(--ink-soft);font-size:13px;">${e.message}</p></div></div>`;
+});
+window.addEventListener("unhandledrejection", function(e){
+  const el = document.getElementById("app");
+  if(el) el.innerHTML = `<div style="padding:40px;"><div class="card"><h2>⚠️ 發生錯誤</h2><p style="color:var(--ink-soft);font-size:13px;">${e.reason?.message||e.reason}</p></div></div>`;
+});
+
+let sb = null;
+let initError = "";
+try{
+  if(!window.supabase){ throw new Error("Supabase JS 函式庫未載入成功，請檢查網路連線。"); }
+  sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+}catch(e){ initError = e.message || String(e); }
+
+/* ============================================================
+   常數
+   ============================================================ */
+const URGENCY_LABEL = { normal:"一般", operational:"影響營運", urgent:"緊急" };
+const STATUS_LABEL = {
+  new:"新案件", pending_review:"待總務確認", pending_info:"資料待補",
+  initial_troubleshoot:"初步排除中", contacting_vendor:"聯絡廠商中", pending_quote:"等待報價",
+  pending_approval:"等待核准", scheduled:"已安排維修", pending_parts:"等待零件",
+  in_repair:"維修中", pending_store_confirm:"待門市確認", repair_done:"維修完成",
+  closed:"已結案", cancelled:"已取消"
+};
+const STATUS_GROUPS = [
+  { label:"待受理", options:["new","pending_review","pending_info"] },
+  { label:"處理中", options:["initial_troubleshoot","contacting_vendor","pending_quote","pending_approval","scheduled","pending_parts","in_repair"] },
+  { label:"待確認／完成", options:["pending_store_confirm","repair_done"] },
+  { label:"結束", options:["closed","cancelled"] },
+];
+const ROLE_LABEL = { store:"門市人員", general_affairs:"總務人員", district_manager:"區經理", admin:"系統管理者" };
+const ATTACH_CATEGORY_LABEL = {
+  fault_photo_video:"故障照片/影片", after_repair_photo:"維修後照片", receipt:"回執單/簽收單",
+  quote:"報價單", invoice:"維修單/發票", other:"其他文件", approval_doc:"簽呈文件"
+};
+
+/* ============================================================
+   狀態
+   ============================================================ */
+let state = {
+  view: "login",
+  session: null, profile: null,
+  loginError: "",
+  stores: [], vendors: [],
+  dashboardStats: null,
+  caseFilters: { status:"", storeId:"", urgency:"", q:"" },
+  cases: [],
+  currentCase: null, caseLogs: [], caseAttachments: [],
+  accounts: [],
+  vendorFormError: "",
+};
+
+const app = document.getElementById("app");
+
+function render(){
+  if(!sb){ app.innerHTML = configWarning(); return; }
+  if(state.view === "login"){ app.innerHTML = renderLogin(); bindEvents(); return; }
+
+  app.innerHTML = `
+  <div class="shell">
+    ${renderSidebar()}
+    <div class="main-col">
+      ${renderTopbar()}
+      <div class="content">${renderViewBody()}</div>
+    </div>
+  </div>`;
+  bindEvents();
+}
+
+function configWarning(){
+  return `<div style="padding:40px;"><div class="card"><h2>⚙️ 尚未設定 Supabase 連線</h2>
+    <p style="color:var(--ink-soft);font-size:13px;">${initError}</p></div></div>`;
+}
+
+/* ---------------- 登入 ---------------- */
+function renderLogin(){
+  return `
+  <div class="login-wrap"><div class="login-box">
+    <div class="login-mark">🔧</div>
+    <h1 class="login-title">總務報修系統</h1>
+    <p class="login-tag">Facility &amp; Repair Ops · 總務端</p>
+    <div class="card">
+      <label class="field-label">Email</label>
+      <input type="email" id="login-email" placeholder="you@example.com">
+      <label class="field-label">密碼</label>
+      <input type="password" id="login-password" placeholder="請輸入密碼">
+      ${state.loginError ? `<div class="error-msg">${state.loginError}</div>` : ""}
+      <div style="margin-top:16px;"><button class="btn btn-primary" style="width:100%;" data-action="do-login">登入</button></div>
+    </div>
+    <p style="text-align:center; font-size:12px; color:var(--ink-soft); margin-top:16px;">
+      帳號需先透過門市端網頁申請，並由系統管理者啟用後才能登入。
+    </p>
+  </div></div>`;
+}
+
+/* ---------------- 側邊欄 ---------------- */
+function renderSidebar(){
+  const items = [
+    { key:"dashboard", label:"Dashboard", ico:"📊" },
+    { key:"case-list", label:"案件列表", ico:"📋" },
+    { key:"accounts", label:"帳號管理", ico:"👤" },
+    { key:"vendors", label:"廠商管理", ico:"🧰" },
+  ];
+  return `
+  <div class="sidebar">
+    <div class="brand">🔧 總務報修</div>
+    ${items.map(i=>`<div class="nav-item" data-action="nav" data-view="${i.key}" data-active="${state.view===i.key}">${i.ico} ${i.label}</div>`).join("")}
+    <div class="spacer"></div>
+    <div class="who">
+      <b>${state.profile?.display_name || ""}</b>
+      ${ROLE_LABEL[state.profile?.role] || ""}
+      <div style="margin-top:8px;"><span class="logout-link" data-action="do-logout">登出</span></div>
+    </div>
+  </div>`;
+}
+
+function renderTopbar(){
+  const titles = { dashboard:"Dashboard", "case-list":"案件列表", "case-detail":"案件詳情", accounts:"帳號管理", vendors:"廠商管理" };
+  const showBack = state.view === "case-detail";
+  return `
+  <div class="topbar">
+    ${showBack ? `<span class="back" data-action="nav" data-view="case-list">‹ 返回列表</span>` : ""}
+    <h1>${titles[state.view] || ""}</h1>
+  </div>`;
+}
+
+function renderViewBody(){
+  if(state.view === "dashboard") return renderDashboard();
+  if(state.view === "case-list") return renderCaseList();
+  if(state.view === "case-detail") return renderCaseDetail();
+  if(state.view === "accounts") return renderAccounts();
+  if(state.view === "vendors") return renderVendors();
+  return "";
+}
+
+/* ---------------- Dashboard ---------------- */
+function renderDashboard(){
+  const st = state.dashboardStats;
+  if(!st) return `<div class="empty">載入中…</div>`;
+  const cards = [
+    { key:"today", label:"今日新增", n:st.today, tone:"" },
+    { key:"pending", label:"待處理", n:st.pending, tone:"" },
+    { key:"pending_info", label:"資料待補", n:st.pendingInfo, tone:"warn" },
+    { key:"in_progress", label:"處理中", n:st.inProgress, tone:"" },
+    { key:"pending_confirm", label:"待門市確認", n:st.pendingConfirm, tone:"" },
+    { key:"urgent", label:"緊急案件", n:st.urgent, tone:"urgent" },
+    { key:"repeat", label:"重複故障", n:st.repeat, tone:"urgent" },
+    { key:"overdue", label:"逾期未更新", n:st.overdue, tone:"warn" },
+  ];
+  return `
+  <div class="grid grid-4">
+    ${cards.map(c=>`
+      <div class="card stat-card" data-tone="${c.tone}" data-action="nav" data-view="case-list" data-quick="${c.key}">
+        <div class="n">${c.n}</div>
+        <div class="label">${c.label}</div>
+      </div>`).join("")}
+  </div>
+  <div class="section-title">本月摘要</div>
+  <div class="grid grid-3">
+    <div class="card stat-card"><div class="n">${st.monthClosed}</div><div class="label">本月完成</div></div>
+    <div class="card stat-card"><div class="n mono">$${st.monthCost.toLocaleString()}</div><div class="label">本月維修費用</div></div>
+    <div class="card stat-card"><div class="n">${st.pendingAccounts}</div><div class="label">待審核帳號</div></div>
+  </div>`;
+}
+
+/* ---------------- 案件列表 ---------------- */
+function renderCaseList(){
+  const f = state.caseFilters;
+  const storeOptions = state.stores.map(s=>`<option value="${s.id}" ${f.storeId===s.id?'selected':''}>${s.code?('['+s.code+'] '):''}${s.name}</option>`).join("");
+  const statusOptions = STATUS_GROUPS.map(g=>`<optgroup label="${g.label}">${g.options.map(o=>`<option value="${o}" ${f.status===o?'selected':''}>${STATUS_LABEL[o]}</option>`).join("")}</optgroup>`).join("");
+
+  const rows = state.cases;
+  return `
+  <div class="filter-bar">
+    <input type="text" id="filter-q" placeholder="搜尋案件編號…" value="${f.q}">
+    <select id="filter-store"><option value="">全部門市</option>${storeOptions}</select>
+    <select id="filter-status"><option value="">全部狀態</option>${statusOptions}</select>
+    <select id="filter-urgency">
+      <option value="">全部緊急程度</option>
+      <option value="urgent" ${f.urgency==='urgent'?'selected':''}>緊急</option>
+      <option value="operational" ${f.urgency==='operational'?'selected':''}>影響營運</option>
+      <option value="normal" ${f.urgency==='normal'?'selected':''}>一般</option>
+    </select>
+    <button class="btn btn-outline btn-sm" data-action="apply-case-filters">套用篩選</button>
+  </div>
+  <div class="card" style="padding:0; overflow-x:auto;">
+    <table>
+      <thead><tr>
+        <th>案件編號</th><th>門市</th><th>設備/類別</th><th>緊急</th><th>狀態</th><th>建立時間</th><th></th>
+      </tr></thead>
+      <tbody>
+        ${rows.length===0 ? `<tr><td colspan="7" style="text-align:center; color:var(--ink-soft); padding:30px;">目前沒有符合條件的案件</td></tr>` : rows.map(c=>`
+          <tr class="row-clickable" data-action="open-case" data-id="${c.id}">
+            <td class="case-no">#${c.case_no}</td>
+            <td>${c.store_name||''}</td>
+            <td>${c.fault_category||c.general_category||''}${c.repeat_fault?' <span class="repeat-badge">重複</span>':''}</td>
+            <td><span class="status-pill" data-urgency="${c.urgency}">${URGENCY_LABEL[c.urgency]||''}</span></td>
+            <td><span class="status-pill">${STATUS_LABEL[c.status]||c.status}</span></td>
+            <td class="mono" style="font-size:12px; color:var(--ink-soft);">${new Date(c.created_at).toLocaleString('zh-TW',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'})}</td>
+            <td>›</td>
+          </tr>`).join("")}
+      </tbody>
+    </table>
+  </div>`;
+}
+
+/* ---------------- 案件詳情 ---------------- */
+function renderCaseDetail(){
+  const c = state.currentCase;
+  if(!c) return `<div class="empty">找不到案件</div>`;
+
+  const statusOptions = STATUS_GROUPS.map(g=>`<optgroup label="${g.label}">${g.options.map(o=>`<option value="${o}" ${c.status===o?'selected':''}>${STATUS_LABEL[o]}</option>`).join("")}</optgroup>`).join("");
+  const vendorOptions = state.vendors.map(v=>`<option value="${v.id}" ${c.vendor_id===v.id?'selected':''}>${v.name}${v.vendor_type==='temporary'?'（臨時）':''}</option>`).join("");
+
+  const attachCategories = Object.keys(ATTACH_CATEGORY_LABEL);
+  const attachByCategory = {};
+  attachCategories.forEach(cat=>attachByCategory[cat] = state.caseAttachments.filter(a=>a.category===cat));
+
+  return `
+  <div class="grid grid-2" style="align-items:start;">
+    <div>
+      <div class="card">
+        <div style="display:flex; justify-content:space-between; align-items:flex-start;">
+          <div>
+            <div class="case-no" style="font-size:14px;">#${c.case_no}</div>
+            <h2 style="margin-top:4px;">${c.fault_category || c.general_category || '報修案件'}</h2>
+          </div>
+          <div style="text-align:right;">
+            <span class="status-pill" data-urgency="${c.urgency}">${URGENCY_LABEL[c.urgency]}</span>
+            ${c.repeat_fault ? `<div style="margin-top:6px;"><span class="repeat-badge">⚠️ 重複故障</span></div>` : ""}
+          </div>
+        </div>
+        <div class="section-title">基本資訊</div>
+        <p style="font-size:13px; color:var(--ink-soft); margin:4px 0;">門市：${c.store_name||''}</p>
+        <p style="font-size:13px; color:var(--ink-soft); margin:4px 0;">報告日期：${c.report_date||'—'}</p>
+        <p style="font-size:13px; color:var(--ink-soft); margin:4px 0;">報修設備：${c.fault_category||'—'}</p>
+        <p style="font-size:13px; color:var(--ink-soft); margin:4px 0;">報修原因：${c.fault_reason||'—'}</p>
+        <p style="font-size:13px; color:var(--ink-soft); margin:4px 0;">推測原因：${c.suspected_cause||'—'}</p>
+        <p style="font-size:13px; color:var(--ink-soft); margin:4px 0;">目前狀況：${c.fault_description||'—'}</p>
+        <p style="font-size:13px; color:var(--ink-soft); margin:4px 0;">現場報修人：${c.reporter_name||'—'}（${c.reporter_phone||'—'}）</p>
+        <button class="btn btn-outline btn-sm" style="margin-top:10px;" data-action="copy-case-info">📋 複製案件資訊為文字</button>
+      </div>
+
+      <div class="card" style="margin-top:14px;">
+        <div class="section-title" style="margin-top:0;">處理進度</div>
+        <label class="field-label">案件狀態</label>
+        <select id="edit-status">${statusOptions}</select>
+
+        <label class="field-label">處理方式</label>
+        <select id="edit-handling">
+          <option value="">— 尚未決定 —</option>
+          <option value="store_pay" ${c.handling_method==='store_pay'?'selected':''}>門市自付</option>
+          <option value="vendor" ${c.handling_method==='vendor'?'selected':''}>委外廠商</option>
+          <option value="internal" ${c.handling_method==='internal'?'selected':''}>總務內部處理</option>
+        </select>
+        <label class="field-label">門市自付金額</label>
+        <input type="number" id="edit-store-pay" value="${c.store_pay_amount||''}">
+
+        <label class="field-label">廠商</label>
+        <div style="display:flex; gap:8px;">
+          <select id="edit-vendor" style="flex:1;"><option value="">— 未指定 —</option>${vendorOptions}</select>
+          <button class="btn btn-outline btn-sm" data-action="quick-add-vendor">＋臨時廠商</button>
+        </div>
+
+        <div class="grid grid-2">
+          <div><label class="field-label">報價金額</label><input type="number" id="edit-quote" value="${c.quote_amount||''}"></div>
+          <div><label class="field-label">最終費用</label><input type="number" id="edit-final" value="${c.final_amount||''}"></div>
+        </div>
+        <label class="field-label">更換零件</label>
+        <input type="text" id="edit-parts" value="${c.replaced_parts||''}" placeholder="例如：壓縮機、水管">
+        <div class="grid grid-2">
+          <div><label class="field-label">預計維修日期</label><input type="date" id="edit-scheduled" value="${c.scheduled_date||''}"></div>
+          <div><label class="field-label">實際到場日期</label><input type="date" id="edit-arrival" value="${c.actual_arrival_date||''}"></div>
+        </div>
+        <label class="field-label">維修結果說明</label>
+        <textarea id="edit-result">${c.repair_result||''}</textarea>
+        <label class="field-label">維修保固期限</label>
+        <input type="date" id="edit-warranty" value="${c.warranty_until||''}">
+      </div>
+
+      <div class="card" style="margin-top:14px;">
+        <div class="section-title" style="margin-top:0;">費用核准／簽呈</div>
+        <div class="checkbox-row"><input type="checkbox" id="edit-broad-impact" ${c.broad_impact?'checked':''}><label for="edit-broad-impact">廣泛影響（需停業/停止收客）</label></div>
+        <div class="checkbox-row"><input type="checkbox" id="edit-needs-approval" ${c.needs_approval?'checked':''}><label for="edit-needs-approval">需走簽呈</label></div>
+        <label class="field-label">簽呈類型</label>
+        <select id="edit-approval-type">
+          <option value="">—</option>
+          <option value="small" ${c.approval_type==='small'?'selected':''}>小簽呈（3萬以內）</option>
+          <option value="large" ${c.approval_type==='large'?'selected':''}>大簽呈（3萬以上，送日本）</option>
+        </select>
+        <div class="checkbox-row"><input type="checkbox" id="edit-manager-approved" ${c.manager_approved?'checked':''}><label for="edit-manager-approved">已獲協理同意</label></div>
+        <label class="field-label">同意備註</label>
+        <input type="text" id="edit-manager-note" value="${c.manager_approved_note||''}" placeholder="例如：8/28 電話確認">
+      </div>
+
+      <div class="card" style="margin-top:14px;">
+        <label class="field-label">本次更新備註（會記錄到處理歷程）</label>
+        <textarea id="edit-note" placeholder="說明這次更新的原因或補充事項…"></textarea>
+        <button class="btn btn-primary" style="margin-top:10px;" data-action="save-case">儲存變更</button>
+        <span id="save-status"></span>
+      </div>
+    </div>
+
+    <div>
+      <div class="card">
+        <div class="section-title" style="margin-top:0;">附件</div>
+        ${attachCategories.map(cat=>`
+          <p style="font-size:12px; font-weight:700; color:var(--ink-soft); margin:14px 0 6px;">${ATTACH_CATEGORY_LABEL[cat]}</p>
+          <div class="attach-grid">
+            ${attachByCategory[cat].map(a=>`
+              <a href="${a.file_path}" target="_blank" class="attach-item" style="text-decoration:none; color:inherit;">
+                <img src="${a.file_path}" onerror="this.style.display='none'">
+                <div class="cap">${new Date(a.uploaded_at).toLocaleDateString('zh-TW')}</div>
+              </a>`).join("")}
+            <div class="attach-upload-btn" data-action="upload-attachment" data-category="${cat}">＋ 上傳</div>
+          </div>`).join("")}
+      </div>
+
+      <div class="card" style="margin-top:14px;">
+        <div class="section-title" style="margin-top:0;">處理歷程</div>
+        ${state.caseLogs.length===0 ? `<p style="font-size:12px; color:var(--ink-soft);">尚無紀錄</p>` :
+          state.caseLogs.map(l=>`
+            <div class="timeline-item">
+              <div class="t">${new Date(l.created_at).toLocaleString('zh-TW')}</div>
+              <div>${l.note || l.action_type}</div>
+            </div>`).join("")}
+      </div>
+    </div>
+  </div>`;
+}
+
+/* ---------------- 帳號管理 ---------------- */
+function renderAccounts(){
+  const rows = state.accounts;
+  return `
+  <div class="card" style="padding:0; overflow-x:auto;">
+    <table>
+      <thead><tr>
+        <th>姓名</th><th>角色</th><th>門市</th><th>帳號類型</th><th>狀態</th><th></th>
+      </tr></thead>
+      <tbody>
+        ${rows.length===0 ? `<tr><td colspan="6" style="text-align:center; color:var(--ink-soft); padding:30px;">目前沒有帳號資料</td></tr>` : rows.map(u=>`
+          <tr data-account-row="${u.id}">
+            <td>${u.display_name} ${u.status==='disabled'?'<span class="badge-pending">待審核</span>':''}</td>
+            <td>
+              <select data-field="role" data-id="${u.id}">
+                ${Object.keys(ROLE_LABEL).map(r=>`<option value="${r}" ${u.role===r?'selected':''}>${ROLE_LABEL[r]}</option>`).join("")}
+              </select>
+            </td>
+            <td>
+              <select data-field="store_id" data-id="${u.id}">
+                <option value="">— 不綁定 —</option>
+                ${state.stores.map(s=>`<option value="${s.id}" ${u.store_id===s.id?'selected':''}>${s.name}</option>`).join("")}
+              </select>
+            </td>
+            <td style="font-size:12px; color:var(--ink-soft);">${u.account_type==='store'?'店帳號':'個人帳號'}</td>
+            <td>
+              <select data-field="status" data-id="${u.id}">
+                <option value="active" ${u.status==='active'?'selected':''}>啟用</option>
+                <option value="disabled" ${u.status==='disabled'?'selected':''}>停用</option>
+              </select>
+            </td>
+            <td><button class="btn btn-primary btn-sm" data-action="save-account" data-id="${u.id}">儲存</button></td>
+          </tr>`).join("")}
+      </tbody>
+    </table>
+  </div>`;
+}
+
+/* ---------------- 廠商管理 ---------------- */
+function renderVendors(){
+  return `
+  <div class="card">
+    <div class="section-title" style="margin-top:0;">新增廠商</div>
+    <div class="grid grid-2">
+      <div><label class="field-label">廠商名稱</label><input type="text" id="vendor-name"></div>
+      <div><label class="field-label">聯絡人</label><input type="text" id="vendor-contact"></div>
+      <div><label class="field-label">電話</label><input type="text" id="vendor-phone"></div>
+      <div><label class="field-label">LINE / 其他聯絡方式</label><input type="text" id="vendor-line"></div>
+      <div><label class="field-label">服務區域</label><input type="text" id="vendor-area" placeholder="例如：北區、台中以北"></div>
+      <div><label class="field-label">廠商類型</label>
+        <select id="vendor-type"><option value="formal">正式廠商</option><option value="temporary">臨時廠商</option></select>
+      </div>
+    </div>
+    <label class="field-label">備註</label>
+    <textarea id="vendor-notes"></textarea>
+    ${state.vendorFormError ? `<div class="error-msg">${state.vendorFormError}</div>` : ""}
+    <button class="btn btn-primary" style="margin-top:12px;" data-action="add-vendor">新增廠商</button>
+  </div>
+
+  <div class="section-title">廠商清單</div>
+  <div class="card" style="padding:0; overflow-x:auto;">
+    <table>
+      <thead><tr><th>名稱</th><th>類型</th><th>聯絡人</th><th>電話</th><th>服務區域</th></tr></thead>
+      <tbody>
+        ${state.vendors.length===0 ? `<tr><td colspan="5" style="text-align:center; color:var(--ink-soft); padding:30px;">尚無廠商資料</td></tr>` : state.vendors.map(v=>`
+          <tr>
+            <td>${v.name}</td>
+            <td>${v.vendor_type==='formal'?'正式':'臨時'}</td>
+            <td>${v.contact_person||'—'}</td>
+            <td>${v.phone||'—'}</td>
+            <td>${v.service_area||'—'}</td>
+          </tr>`).join("")}
+      </tbody>
+    </table>
+  </div>`;
+}
+
+/* ============================================================
+   事件綁定
+   ============================================================ */
+function bindEvents(){
+  app.querySelectorAll("[data-action]").forEach(el=>{
+    if(el.tagName === "SELECT") return;
+    el.addEventListener("click", onAction);
+  });
+  const loginPw = document.getElementById("login-password");
+  if(loginPw) loginPw.addEventListener("keydown", (e)=>{ if(e.key==="Enter") doLogin(); });
+
+  const filterQ = document.getElementById("filter-q");
+  if(filterQ) filterQ.addEventListener("keydown", (e)=>{ if(e.key==="Enter") applyCaseFilters(); });
+}
+
+async function onAction(e){
+  const el = e.currentTarget;
+  const action = el.dataset.action;
+
+  if(action === "do-login"){ await doLogin(); }
+  else if(action === "do-logout"){ await doLogout(); }
+  else if(action === "nav"){
+    const view = el.dataset.view;
+    if(el.dataset.quick){ applyQuickFilter(el.dataset.quick); }
+    await goTo(view);
+  }
+  else if(action === "apply-case-filters"){ applyCaseFilters(); }
+  else if(action === "open-case"){ await openCase(el.dataset.id); }
+  else if(action === "save-case"){ await saveCase(); }
+  else if(action === "copy-case-info"){ copyCaseInfo(); }
+  else if(action === "upload-attachment"){ triggerAttachmentUpload(el.dataset.category); }
+  else if(action === "quick-add-vendor"){ await quickAddVendor(); }
+  else if(action === "save-account"){ await saveAccount(el.dataset.id); }
+  else if(action === "add-vendor"){ await addVendor(); }
+}
+
+/* ============================================================
+   登入 / 登出
+   ============================================================ */
+async function doLogin(){
+  const email = document.getElementById("login-email")?.value.trim();
+  const password = document.getElementById("login-password")?.value;
+  if(!email || !password){ state.loginError = "請輸入 Email 與密碼"; render(); return; }
+  const { error } = await sb.auth.signInWithPassword({ email, password });
+  if(error){ state.loginError = "登入失敗：" + error.message; render(); return; }
+  state.loginError = "";
+  await afterLogin();
+}
+
+async function doLogout(){
+  await sb.auth.signOut();
+  state = { ...state, view:"login", session:null, profile:null };
+  render();
+}
+
+async function afterLogin(){
+  const { data: { session } } = await sb.auth.getSession();
+  state.session = session;
+  if(!session){ state.view = "login"; render(); return; }
+  const { data: profile, error } = await sb.from("users_profile").select("*").eq("id", session.user.id).maybeSingle();
+  if(error || !profile || profile.status !== "active"){
+    state.loginError = "此帳號尚未啟用，請聯繫系統管理者。";
+    await sb.auth.signOut();
+    state.view = "login"; render(); return;
+  }
+  state.profile = profile;
+  await loadStores();
+  await loadVendors();
+  await goTo("dashboard");
+}
+
+/* ============================================================
+   資料載入
+   ============================================================ */
+async function loadStores(){
+  const { data } = await sb.from("stores").select("id, name, code").eq("status","active").order("code");
+  state.stores = data || [];
+}
+async function loadVendors(){
+  const { data } = await sb.from("vendors").select("*").order("name");
+  state.vendors = data || [];
+}
+
+function scopedCaseQuery(query){
+  const p = state.profile;
+  if(p.role === "store" && p.store_id) return query.eq("store_id", p.store_id);
+  return query;
+}
+
+async function loadDashboard(){
+  const todayStr = new Date().toISOString().slice(0,10);
+  const monthStart = new Date(); monthStart.setDate(1);
+  const monthStartStr = monthStart.toISOString().slice(0,10);
+
+  let q = scopedCaseQuery(sb.from("cases").select("status, urgency, repeat_fault, created_at, final_amount, closed_at"));
+  const { data: allCases, error } = await q;
+  if(error){ console.error(error); return; }
+
+  const { count: pendingAccounts } = await sb.from("users_profile").select("id", { count:"exact", head:true }).eq("status","disabled");
+
+  const stats = { today:0, pending:0, pendingInfo:0, inProgress:0, pendingConfirm:0, urgent:0, repeat:0, overdue:0, monthClosed:0, monthCost:0, pendingAccounts: pendingAccounts||0 };
+  const inProgressSet = new Set(STATUS_GROUPS[1].options);
+  (allCases||[]).forEach(c=>{
+    if(c.created_at && c.created_at.slice(0,10) === todayStr) stats.today++;
+    if(["new","pending_review"].includes(c.status)) stats.pending++;
+    if(c.status === "pending_info") stats.pendingInfo++;
+    if(inProgressSet.has(c.status)) stats.inProgress++;
+    if(c.status === "pending_store_confirm") stats.pendingConfirm++;
+    if(c.urgency === "urgent" && !["closed","cancelled"].includes(c.status)) stats.urgent++;
+    if(c.repeat_fault && !["closed","cancelled"].includes(c.status)) stats.repeat++;
+    if(c.status === "closed" && c.closed_at && c.closed_at.slice(0,10) >= monthStartStr){
+      stats.monthClosed++;
+      stats.monthCost += Number(c.final_amount) || 0;
+    }
+  });
+  state.dashboardStats = stats;
+}
+
+async function loadCases(){
+  const f = state.caseFilters;
+  let q = scopedCaseQuery(sb.from("cases").select("*, stores(name)").order("created_at", { ascending:false }).limit(200));
+  if(f.storeId) q = q.eq("store_id", f.storeId);
+  if(f.status) q = q.eq("status", f.status);
+  if(f.urgency) q = q.eq("urgency", f.urgency);
+  if(f.q) q = q.ilike("case_no", `%${f.q}%`);
+  const { data, error } = await q;
+  if(error){ alert("載入失敗：" + error.message); return; }
+  state.cases = (data||[]).map(c=>({ ...c, store_name: c.stores?.name || "" }));
+}
+
+function applyQuickFilter(key){
+  const f = { status:"", storeId:"", urgency:"", q:"" };
+  if(key === "pending") f.status = "new";
+  if(key === "pending_info") f.status = "pending_info";
+  if(key === "pending_confirm") f.status = "pending_store_confirm";
+  if(key === "urgent") f.urgency = "urgent";
+  state.caseFilters = f;
+}
+
+async function applyCaseFilters(){
+  state.caseFilters.storeId = document.getElementById("filter-store")?.value || "";
+  state.caseFilters.status = document.getElementById("filter-status")?.value || "";
+  state.caseFilters.urgency = document.getElementById("filter-urgency")?.value || "";
+  state.caseFilters.q = document.getElementById("filter-q")?.value || "";
+  await loadCases();
+  render();
+}
+
+async function loadAccounts(){
+  const { data, error } = await sb.from("users_profile").select("*").order("status").order("display_name");
+  if(error){ alert("載入失敗：" + error.message); return; }
+  state.accounts = data || [];
+}
+
+/* ============================================================
+   導覽
+   ============================================================ */
+async function goTo(view){
+  state.view = view;
+  if(view === "dashboard") await loadDashboard();
+  else if(view === "case-list") await loadCases();
+  else if(view === "accounts") await loadAccounts();
+  else if(view === "vendors") await loadVendors();
+  render();
+}
+
+/* ============================================================
+   案件詳情
+   ============================================================ */
+async function openCase(id){
+  const { data, error } = await sb.from("cases").select("*, stores(name)").eq("id", id).single();
+  if(error){ alert("載入失敗：" + error.message); return; }
+  state.currentCase = { ...data, store_name: data.stores?.name || "" };
+  state.view = "case-detail";
+  render();
+  loadCaseLogs(id);
+  loadCaseAttachments(id);
+}
+
+async function loadCaseLogs(caseId){
+  const { data } = await sb.from("case_logs").select("*").eq("case_id", caseId).order("created_at", { ascending:false });
+  state.caseLogs = data || [];
+  if(state.view === "case-detail") render();
+}
+
+async function loadCaseAttachments(caseId){
+  const { data } = await sb.from("attachments").select("*").eq("related_type","case").eq("related_id", caseId).order("uploaded_at", { ascending:false });
+  state.caseAttachments = data || [];
+  if(state.view === "case-detail") render();
+}
+
+async function saveCase(){
+  const c = state.currentCase;
+  const newStatus = document.getElementById("edit-status").value;
+  const note = document.getElementById("edit-note").value.trim();
+
+  const updates = {
+    status: newStatus,
+    handling_method: document.getElementById("edit-handling").value || null,
+    store_pay_amount: numOrNull(document.getElementById("edit-store-pay").value),
+    vendor_id: document.getElementById("edit-vendor").value || null,
+    quote_amount: numOrNull(document.getElementById("edit-quote").value),
+    final_amount: numOrNull(document.getElementById("edit-final").value),
+    replaced_parts: document.getElementById("edit-parts").value || null,
+    scheduled_date: document.getElementById("edit-scheduled").value || null,
+    actual_arrival_date: document.getElementById("edit-arrival").value || null,
+    repair_result: document.getElementById("edit-result").value || null,
+    warranty_until: document.getElementById("edit-warranty").value || null,
+    broad_impact: document.getElementById("edit-broad-impact").checked,
+    needs_approval: document.getElementById("edit-needs-approval").checked,
+    approval_type: document.getElementById("edit-approval-type").value || null,
+    manager_approved: document.getElementById("edit-manager-approved").checked,
+    manager_approved_note: document.getElementById("edit-manager-note").value || null,
+    updated_at: new Date().toISOString()
+  };
+  if(newStatus === "closed" && !c.closed_at) updates.closed_at = new Date().toISOString();
+
+  const { error } = await sb.from("cases").update(updates).eq("id", c.id);
+  const statusEl = document.getElementById("save-status");
+  if(error){ statusEl.innerHTML = `<div class="error-msg">儲存失敗：${error.message}</div>`; return; }
+
+  if(newStatus !== c.status || note){
+    await sb.from("case_logs").insert({
+      case_id: c.id, action_type:"status_change",
+      from_status: c.status, to_status: newStatus,
+      note: note || `狀態更新為「${STATUS_LABEL[newStatus]}」`,
+      created_by: state.profile.id
+    });
+  }
+
+  statusEl.innerHTML = `<div class="success-msg">已儲存</div>`;
+  await openCase(c.id);
+}
+
+function numOrNull(v){ return v === "" || v === null || v === undefined ? null : Number(v); }
+
+function copyCaseInfo(){
+  const c = state.currentCase;
+  const text = [
+    `店鋪：${c.store_name}`,
+    `報告日期：${c.report_date||''}`,
+    `報修設備：${c.fault_category||''}`,
+    `報修原因：${c.fault_reason||''}`,
+    `推測原因：${c.suspected_cause||''}`,
+    `目前狀況：${c.fault_description||''}`,
+    `現場報修人：${c.reporter_name||''}`,
+    `聯絡電話：${c.reporter_phone||''}`
+  ].join("\n");
+  navigator.clipboard.writeText(text).then(()=>{
+    alert("已複製到剪貼簿，可直接貼到 LINE");
+  }).catch(()=>{
+    prompt("請手動複製以下內容：", text);
+  });
+}
+
+async function quickAddVendor(){
+  const name = prompt("臨時廠商名稱：");
+  if(!name) return;
+  const { data, error } = await sb.from("vendors").insert({ name, vendor_type:"temporary" }).select().single();
+  if(error){ alert("新增失敗：" + error.message); return; }
+  state.vendors.push(data);
+  render();
+  const sel = document.getElementById("edit-vendor");
+  if(sel) sel.value = data.id;
+}
+
+/* ---------------- 附件上傳 ---------------- */
+const attachInput = document.createElement("input");
+attachInput.type = "file";
+attachInput.accept = "image/*,video/*,application/pdf";
+attachInput.style.display = "none";
+document.body.appendChild(attachInput);
+let attachTargetCategory = null;
+
+attachInput.addEventListener("change", async (e)=>{
+  const file = e.target.files[0];
+  attachInput.value = "";
+  const category = attachTargetCategory;
+  attachTargetCategory = null;
+  if(!file || !category || !state.currentCase) return;
+  try{
+    const ext = (file.name.split(".").pop() || "dat").toLowerCase();
+    const path = `case-photos/${state.currentCase.id}/${Date.now()}-${Math.random().toString(36).slice(2,7)}.${ext}`;
+    const { error: upErr } = await sb.storage.from("attachments").upload(path, file);
+    if(upErr) throw upErr;
+    const { data: urlData } = sb.storage.from("attachments").getPublicUrl(path);
+    const { error: insErr } = await sb.from("attachments").insert({
+      related_type:"case", related_id: state.currentCase.id, category,
+      file_path: urlData.publicUrl, uploaded_by: state.profile.id
+    });
+    if(insErr) throw insErr;
+    await loadCaseAttachments(state.currentCase.id);
+  }catch(err){
+    alert("上傳失敗：" + err.message);
+  }
+});
+
+function triggerAttachmentUpload(category){
+  attachTargetCategory = category;
+  attachInput.click();
+}
+
+/* ============================================================
+   帳號管理
+   ============================================================ */
+async function saveAccount(id){
+  const row = document.querySelector(`tr[data-account-row="${id}"]`);
+  const role = row.querySelector('[data-field="role"]').value;
+  const storeId = row.querySelector('[data-field="store_id"]').value || null;
+  const status = row.querySelector('[data-field="status"]').value;
+  const { error } = await sb.from("users_profile").update({ role, store_id: storeId, status }).eq("id", id);
+  if(error){ alert("儲存失敗：" + error.message); return; }
+  await loadAccounts();
+  render();
+}
+
+/* ============================================================
+   廠商管理
+   ============================================================ */
+async function addVendor(){
+  const name = document.getElementById("vendor-name").value.trim();
+  if(!name){ state.vendorFormError = "請輸入廠商名稱"; render(); return; }
+  const payload = {
+    name,
+    contact_person: document.getElementById("vendor-contact").value || null,
+    phone: document.getElementById("vendor-phone").value || null,
+    line_contact: document.getElementById("vendor-line").value || null,
+    service_area: document.getElementById("vendor-area").value || null,
+    vendor_type: document.getElementById("vendor-type").value,
+    notes: document.getElementById("vendor-notes").value || null
+  };
+  const { error } = await sb.from("vendors").insert(payload);
+  if(error){ state.vendorFormError = "新增失敗：" + error.message; render(); return; }
+  state.vendorFormError = "";
+  await loadVendors();
+  render();
+}
+
+/* ============================================================
+   初始化
+   ============================================================ */
+async function init(){
+  try{
+    if(!sb){ render(); return; }
+    const timeout = (ms) => new Promise((_, reject) => setTimeout(() => reject(new Error(`連線逾時（超過 ${ms/1000} 秒）`)), ms));
+    const { data: { session } } = await Promise.race([sb.auth.getSession(), timeout(8000)]);
+    if(session){ state.session = session; await afterLogin(); }
+    else { state.view = "login"; render(); }
+  }catch(err){
+    app.innerHTML = `<div style="padding:40px;"><div class="card"><h2>⚠️ 載入時發生錯誤</h2><p style="color:var(--ink-soft);font-size:13px;">${err.message||err}</p></div></div>`;
+  }
+}
+init();
+</script>
+</body>
+</html>
