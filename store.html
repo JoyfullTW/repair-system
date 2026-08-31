@@ -260,6 +260,7 @@ let state = {
   loginError: "",
   signupError: "",
   stores: [],             // 供申請帳號時選擇門市
+  generalCategories: [],  // 一般報修類別（從資料庫載入）
   newReport: { step:1, repairType:null, assetId:null, assetLabel:"", generalCategory:null,
                selectedStoreId: null,
                reportDate: new Date().toISOString().slice(0,10),
@@ -421,7 +422,7 @@ function renderNewReport(){
       <input type="text" id="asset-search" placeholder="例如：製冰機 或 C002-17-001-0001">
       <div id="asset-results" style="margin-top:12px; color:var(--ink-soft); font-size:13px;">輸入關鍵字開始搜尋…</div>`;
   } else if(s.step === 2 && s.repairType === "general"){
-    const cats = ["水電","門鎖","牆面","招牌","排水","其他"];
+    const cats = state.generalCategories.length ? state.generalCategories : ["水電","門鎖","牆面","招牌","排水","其他"];
     body = `
       <h2 style="margin:4px 0 16px;">選擇一般報修類別</h2>
       <div class="chip-group">
@@ -719,6 +720,7 @@ async function onAction(e){
   else if(action === "go-new-report"){
     resetNewReport();
     if(!state.storeId) await loadStoresForSignup();
+    if(state.generalCategories.length === 0) await loadGeneralCategories();
     state.view="new-report"; render();
   }
   else if(action === "go-my-cases"){ await loadMyCases(); state.view="my-cases"; render(); }
@@ -919,6 +921,15 @@ async function doLogin(){
 async function loadStoresForSignup(){
   const { data, error } = await sb.from("stores").select("id, name, code").eq("status","active").order("code");
   if(!error) state.stores = data || [];
+}
+
+async function loadGeneralCategories(){
+  const { data, error } = await sb.from("general_report_categories")
+    .select("name").eq("active", true).order("sort_order");
+  if(!error && data && data.length > 0){
+    state.generalCategories = data.map(r=>r.name);
+  }
+  // 若資料庫尚未建表或查詢失敗，renderNewReport 會自動退回內建的預設清單，不會讓畫面空白
 }
 
 async function doSignup(){
