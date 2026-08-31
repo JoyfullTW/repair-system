@@ -209,14 +209,14 @@ window.addEventListener("unhandledrejection", function(e){
     </main>`;
 });
 
-let supabase = null;
+let sb = null;
 let initError = "";
 try{
   if(!window.supabase){
     throw new Error("Supabase JS 函式庫未載入成功（window.supabase 不存在），可能是 CDN 連線被擋，或網路異常。");
   }
   if(SUPABASE_URL.startsWith("http")){
-    supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+    sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
   }
 }catch(e){
   initError = e.message || String(e);
@@ -253,7 +253,7 @@ let state = {
 const app = document.getElementById("app");
 
 function render(){
-  if(!supabase){
+  if(!sb){
     app.innerHTML = configWarning();
     return;
   }
@@ -602,7 +602,7 @@ function onAssetSearch(e){
   assetSearchTimer = setTimeout(async ()=>{
     const box = document.getElementById("asset-results");
     if(!q){ box.innerHTML = "輸入關鍵字開始搜尋…"; return; }
-    const { data, error } = await supabase.from("assets")
+    const { data, error } = await sb.from("assets")
       .select("id, asset_no, name")
       .eq("store_id", state.storeId)
       .or(`name.ilike.%${q}%,asset_no.ilike.%${q}%`)
@@ -640,7 +640,7 @@ async function submitReport(){
     status: "new"
   };
 
-  const { data, error } = await supabase.from("cases").insert(payload).select().single();
+  const { data, error } = await sb.from("cases").insert(payload).select().single();
   if(error){ alert("送出失敗：" + error.message); return; }
   state.currentCase = data;
   state.view = "new-report-success";
@@ -648,7 +648,7 @@ async function submitReport(){
 }
 
 async function loadMyCases(){
-  const { data, error } = await supabase.from("cases")
+  const { data, error } = await sb.from("cases")
     .select("*, assets(name)")
     .eq("store_id", state.storeId)
     .order("created_at", { ascending:false });
@@ -657,7 +657,7 @@ async function loadMyCases(){
 }
 
 async function openCase(id){
-  const { data, error } = await supabase.from("cases").select("*, assets(name)").eq("id", id).single();
+  const { data, error } = await sb.from("cases").select("*, assets(name)").eq("id", id).single();
   if(error){ alert("載入失敗：" + error.message); return; }
   state.currentCase = { ...data, asset_name: data.assets?.name || "" };
   state.view = "case-detail";
@@ -668,7 +668,7 @@ async function openCase(id){
 async function loadCaseTimeline(caseId){
   const el = document.getElementById("case-timeline");
   if(!el) return;
-  const { data, error } = await supabase.from("case_logs")
+  const { data, error } = await sb.from("case_logs")
     .select("*").eq("case_id", caseId).order("created_at", { ascending:true });
   if(error){ el.textContent = "無法載入處理歷程"; return; }
   if(!data || data.length===0){ el.textContent = "尚無處理紀錄"; return; }
@@ -678,7 +678,7 @@ async function loadCaseTimeline(caseId){
 async function confirmCaseResult(result){
   const c = state.currentCase;
   const newStatus = result === "normal" ? "closed" : "in_repair";
-  const { error } = await supabase.from("cases").update({
+  const { error } = await sb.from("cases").update({
     store_confirm_result: result,
     status: newStatus,
     closed_at: result === "normal" ? new Date().toISOString() : null
@@ -696,14 +696,14 @@ async function doLogin(){
   const password = document.getElementById("login-password")?.value;
   if(!email || !password){ state.loginError = "請輸入 Email 與密碼"; render(); return; }
 
-  const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+  const { data, error } = await sb.auth.signInWithPassword({ email, password });
   if(error){ state.loginError = "登入失敗：" + error.message; render(); return; }
   state.loginError = "";
   await loadProfileAndEnter();
 }
 
 async function loadStoresForSignup(){
-  const { data, error } = await supabase.from("stores").select("id, name").eq("status","active").order("name");
+  const { data, error } = await sb.from("stores").select("id, name").eq("status","active").order("name");
   if(!error) state.stores = data || [];
 }
 
@@ -718,13 +718,13 @@ async function doSignup(){
     render(); return;
   }
 
-  const { data: signUpData, error: signUpError } = await supabase.auth.signUp({ email, password });
+  const { data: signUpData, error: signUpError } = await sb.auth.signUp({ email, password });
   if(signUpError){ state.signupError = "申請失敗：" + signUpError.message; render(); return; }
 
   const userId = signUpData.user?.id;
   if(userId){
     // 建立對應的 users_profile，狀態預設為 disabled，待系統管理者指派角色後啟用
-    const { error: profileError } = await supabase.from("users_profile").insert({
+    const { error: profileError } = await sb.from("users_profile").insert({
       id: userId, display_name: name, role: "store", account_type: "personal",
       store_id: storeId, status: "disabled"
     });
@@ -737,18 +737,18 @@ async function doSignup(){
 }
 
 async function doLogout(){
-  await supabase.auth.signOut();
+  await sb.auth.signOut();
   state.session = null; state.profile = null; state.storeId = null; state.storeName = "";
   state.view = "login";
   render();
 }
 
 async function loadProfileAndEnter(){
-  const { data: { session } } = await supabase.auth.getSession();
+  const { data: { session } } = await sb.auth.getSession();
   state.session = session;
   if(!session){ state.view = "login"; render(); return; }
 
-  const { data: profile, error } = await supabase.from("users_profile")
+  const { data: profile, error } = await sb.from("users_profile")
     .select("*, stores(name)").eq("id", session.user.id).maybeSingle();
 
   if(error || !profile || profile.status !== "active"){
@@ -769,14 +769,14 @@ async function loadProfileAndEnter(){
    ============================================================ */
 async function init(){
   try{
-    if(!supabase){ render(); return; }
+    if(!sb){ render(); return; }
 
     const timeout = (ms) => new Promise((_, reject) =>
       setTimeout(() => reject(new Error(`連線逾時（超過 ${ms/1000} 秒沒有回應），請檢查網路，或確認 Supabase 專案的 URL / Key 是否正確。`)), ms)
     );
 
     const { data: { session } } = await Promise.race([
-      supabase.auth.getSession(),
+      sb.auth.getSession(),
       timeout(8000)
     ]);
 
