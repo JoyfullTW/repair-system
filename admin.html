@@ -149,10 +149,17 @@
 
   .badge-pending{ background:var(--warn); color:#fff; font-size:10px; font-weight:700; padding:2px 7px; border-radius:5px; }
   .hidden{ display:none !important; }
+  .version-badge{
+    position:fixed; bottom:8px; right:10px; z-index:9999; pointer-events:none;
+    font-family:"JetBrains Mono",monospace; font-size:10px; letter-spacing:.03em;
+    color:var(--ink-soft); background:var(--surface); border:1px solid var(--border);
+    padding:2px 7px; border-radius:5px; opacity:.75;
+  }
 </style>
 </head>
 <body>
 <div id="app"></div>
+<div class="version-badge">admin v2026-09-01.1</div>
 
 <script>
 /* ============================================================
@@ -207,7 +214,12 @@ let state = {
   view: "login",
   session: null, profile: null,
   loginError: "",
-  stores: [], vendors: [],
+  stores: [], vendors: [], regions: [],
+  storeFormError: "",
+  assets: [], assetMajorCategories: [],
+  assetFilters: { storeId:"", majorCode:"", q:"" },
+  currentAsset: null, assetFormError: "", assetLogs: [],
+  assignmentRules: [], assignmentFilters: { storeId:"", confirmStatus:"" }, assignmentFormError: "",
   dashboardStats: null,
   caseFilters: { status:"", storeId:"", urgency:"", q:"" },
   cases: [],
@@ -264,8 +276,11 @@ function renderSidebar(){
   const items = [
     { key:"dashboard", label:"Dashboard", ico:"📊" },
     { key:"case-list", label:"案件列表", ico:"📋" },
+    { key:"assets", label:"資產管理", ico:"🧊" },
+    { key:"stores", label:"門市管理", ico:"🏬" },
     { key:"accounts", label:"帳號管理", ico:"👤" },
     { key:"vendors", label:"廠商管理", ico:"🧰" },
+    { key:"assignment-rules", label:"廠商指派規則", ico:"🗂️" },
   ];
   return `
   <div class="sidebar">
@@ -281,11 +296,11 @@ function renderSidebar(){
 }
 
 function renderTopbar(){
-  const titles = { dashboard:"Dashboard", "case-list":"案件列表", "case-detail":"案件詳情", accounts:"帳號管理", vendors:"廠商管理" };
-  const showBack = state.view === "case-detail";
+  const titles = { dashboard:"Dashboard", "case-list":"案件列表", "case-detail":"案件詳情", assets:"資產管理", "asset-detail":"資產詳情", stores:"門市管理", accounts:"帳號管理", vendors:"廠商管理", "assignment-rules":"廠商指派規則" };
+  const showBack = state.view === "case-detail" || state.view === "asset-detail";
   return `
   <div class="topbar">
-    ${showBack ? `<span class="back" data-action="nav" data-view="case-list">‹ 返回列表</span>` : ""}
+    ${showBack ? `<span class="back" data-action="nav" data-view="${state.view==='asset-detail'?'assets':'case-list'}">‹ 返回列表</span>` : ""}
     <h1>${titles[state.view] || ""}</h1>
   </div>`;
 }
@@ -294,8 +309,12 @@ function renderViewBody(){
   if(state.view === "dashboard") return renderDashboard();
   if(state.view === "case-list") return renderCaseList();
   if(state.view === "case-detail") return renderCaseDetail();
+  if(state.view === "assets") return renderAssets();
+  if(state.view === "asset-detail") return renderAssetDetail();
+  if(state.view === "stores") return renderStores();
   if(state.view === "accounts") return renderAccounts();
   if(state.view === "vendors") return renderVendors();
+  if(state.view === "assignment-rules") return renderAssignmentRules();
   return "";
 }
 
@@ -332,7 +351,7 @@ function renderDashboard(){
 /* ---------------- 案件列表 ---------------- */
 function renderCaseList(){
   const f = state.caseFilters;
-  const storeOptions = state.stores.map(s=>`<option value="${s.id}" ${f.storeId===s.id?'selected':''}>${s.code?('['+s.code+'] '):''}${s.name}</option>`).join("");
+  const storeOptions = state.stores.filter(s=>s.status==='active').map(s=>`<option value="${s.id}" ${f.storeId===s.id?'selected':''}>${s.code?('['+s.code+'] '):''}${s.name}</option>`).join("");
   const statusOptions = STATUS_GROUPS.map(g=>`<optgroup label="${g.label}">${g.options.map(o=>`<option value="${o}" ${f.status===o?'selected':''}>${STATUS_LABEL[o]}</option>`).join("")}</optgroup>`).join("");
 
   const rows = state.cases;
@@ -404,7 +423,8 @@ function renderCaseDetail(){
         <p style="font-size:13px; color:var(--ink-soft); margin:4px 0;">推測原因：${c.suspected_cause||'—'}</p>
         <p style="font-size:13px; color:var(--ink-soft); margin:4px 0;">目前狀況：${c.fault_description||'—'}</p>
         <p style="font-size:13px; color:var(--ink-soft); margin:4px 0;">現場報修人：${c.reporter_name||'—'}（${c.reporter_phone||'—'}）</p>
-        <button class="btn btn-outline btn-sm" style="margin-top:10px;" data-action="copy-case-info">📋 複製案件資訊為文字</button>
+        <button class="btn btn-outline btn-sm" style="margin-top:10px;" data-action="copy-case-info">📋 複製案件資訊＋照片連結</button>
+        <p style="font-size:11px; color:var(--ink-soft); margin-top:6px;">複製後可直接貼到 LINE 群組給廠商，照片連結不需登入即可開啟。</p>
       </div>
 
       <div class="card" style="margin-top:14px;">
@@ -502,10 +522,10 @@ function renderAccounts(){
   <div class="card" style="padding:0; overflow-x:auto;">
     <table>
       <thead><tr>
-        <th>姓名</th><th>角色</th><th>門市</th><th>帳號類型</th><th>狀態</th><th></th>
+        <th>姓名</th><th>角色</th><th>門市</th><th>轄區（區經理用）</th><th>帳號類型</th><th>狀態</th><th></th>
       </tr></thead>
       <tbody>
-        ${rows.length===0 ? `<tr><td colspan="6" style="text-align:center; color:var(--ink-soft); padding:30px;">目前沒有帳號資料</td></tr>` : rows.map(u=>`
+        ${rows.length===0 ? `<tr><td colspan="7" style="text-align:center; color:var(--ink-soft); padding:30px;">目前沒有帳號資料</td></tr>` : rows.map(u=>`
           <tr data-account-row="${u.id}">
             <td>${u.display_name} ${u.status==='disabled'?'<span class="badge-pending">待審核</span>':''}</td>
             <td>
@@ -516,7 +536,13 @@ function renderAccounts(){
             <td>
               <select data-field="store_id" data-id="${u.id}">
                 <option value="">— 不綁定 —</option>
-                ${state.stores.map(s=>`<option value="${s.id}" ${u.store_id===s.id?'selected':''}>${s.name}</option>`).join("")}
+                ${state.stores.filter(s=>s.status==='active').map(s=>`<option value="${s.id}" ${u.store_id===s.id?'selected':''}>${s.name}</option>`).join("")}
+              </select>
+            </td>
+            <td>
+              <select data-field="region_id" data-id="${u.id}">
+                <option value="">— 不綁定 —</option>
+                ${(state.regions||[]).map(r=>`<option value="${r.id}" ${u.region_id===r.id?'selected':''}>${r.name}</option>`).join("")}
               </select>
             </td>
             <td style="font-size:12px; color:var(--ink-soft);">${u.account_type==='store'?'店帳號':'個人帳號'}</td>
@@ -530,6 +556,166 @@ function renderAccounts(){
           </tr>`).join("")}
       </tbody>
     </table>
+  </div>`;
+}
+
+/* ---------------- 門市管理 ---------------- */
+function renderStores(){
+  return `
+  <div class="grid grid-2" style="align-items:start;">
+    <div class="card">
+      <div class="section-title" style="margin-top:0;">新增區域</div>
+      <p style="font-size:12px; color:var(--ink-soft); margin:0 0 10px;">例如：北1、北2、中、南1、南2，供區經理轄區與未來展店分配使用。</p>
+      <div style="display:flex; gap:8px;">
+        <input type="text" id="new-region-name" placeholder="區域名稱">
+        <button class="btn btn-primary btn-sm" data-action="add-region">新增</button>
+      </div>
+      ${state.storeFormError ? `<div class="error-msg">${state.storeFormError}</div>` : ""}
+      <div class="section-title">既有區域</div>
+      <div style="display:flex; flex-wrap:wrap; gap:8px;">
+        ${(state.regions||[]).length===0 ? `<p style="font-size:12px; color:var(--ink-soft);">尚無區域資料</p>` :
+          state.regions.map(r=>`<span class="status-pill">${r.name}</span>`).join("")}
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="section-title" style="margin-top:0;">新增門市</div>
+      <label class="field-label">門市代碼</label>
+      <input type="text" id="new-store-code" placeholder="例如：002（沿用既有訂購系統代碼）">
+      <label class="field-label">門市名稱</label>
+      <input type="text" id="new-store-name" placeholder="例如：米平方">
+      <label class="field-label">所屬區域</label>
+      <select id="new-store-region">
+        <option value="">— 未指定 —</option>
+        ${(state.regions||[]).map(r=>`<option value="${r.id}">${r.name}</option>`).join("")}
+      </select>
+      <div class="checkbox-row"><input type="checkbox" id="new-store-central"><label for="new-store-central">中央廚房／非門市單位</label></div>
+      <button class="btn btn-primary" style="margin-top:10px;" data-action="add-store">新增門市</button>
+    </div>
+  </div>
+
+  <div class="section-title">門市清單</div>
+  <div class="card" style="padding:0; overflow-x:auto;">
+    <table>
+      <thead><tr><th>代碼</th><th>名稱</th><th>區域</th><th>狀態</th><th></th></tr></thead>
+      <tbody>
+        ${state.stores.length===0 ? `<tr><td colspan="5" style="text-align:center; color:var(--ink-soft); padding:30px;">尚無門市資料</td></tr>` : state.stores.map(s=>`
+          <tr data-store-row="${s.id}">
+            <td class="mono">${s.code||''}</td>
+            <td>${s.name}${s.is_central_unit?' <span class="status-pill">中央廚房</span>':''}</td>
+            <td>
+              <select data-field="region_id" data-id="${s.id}">
+                <option value="">— 未指定 —</option>
+                ${(state.regions||[]).map(r=>`<option value="${r.id}" ${s.region_id===r.id?'selected':''}>${r.name}</option>`).join("")}
+              </select>
+            </td>
+            <td>
+              <select data-field="status" data-id="${s.id}">
+                <option value="active" ${s.status==='active'?'selected':''}>營業中</option>
+                <option value="closed" ${s.status==='closed'?'selected':''}>已歇業</option>
+              </select>
+            </td>
+            <td><button class="btn btn-primary btn-sm" data-action="save-store" data-id="${s.id}">儲存</button></td>
+          </tr>`).join("")}
+      </tbody>
+    </table>
+  </div>`;
+}
+
+/* ---------------- 資產管理 ---------------- */
+const ASSET_STATUS_LABEL = {
+  in_use:"使用中", standby:"備用", under_repair:"送修中", disabled:"停用",
+  transferring:"調撥中", pending_scrap:"無法維修/待報廢", scrapped:"報廢"
+};
+
+function renderAssets(){
+  const f = state.assetFilters;
+  const storeOptions = state.stores.filter(s=>s.status==='active').map(s=>`<option value="${s.id}" ${f.storeId===s.id?'selected':''}>${s.code?('['+s.code+'] '):''}${s.name}</option>`).join("");
+  const majorOptions = state.assetMajorCategories.map(m=>`<option value="${m.code}" ${f.majorCode===m.code?'selected':''}>${m.code} ${m.name}</option>`).join("");
+
+  return `
+  <div class="filter-bar">
+    <input type="text" id="asset-filter-q" placeholder="搜尋資產編號或名稱…" value="${f.q}">
+    <select id="asset-filter-store"><option value="">全部門市</option>${storeOptions}</select>
+    <select id="asset-filter-major"><option value="">全部大類</option>${majorOptions}</select>
+    <button class="btn btn-outline btn-sm" data-action="apply-asset-filters">套用篩選</button>
+    <button class="btn btn-primary btn-sm" data-action="new-asset" style="margin-left:auto;">＋新增資產</button>
+  </div>
+  <div class="card" style="padding:0; overflow-x:auto;">
+    <table>
+      <thead><tr><th>資產編號</th><th>名稱</th><th>門市</th><th>狀態</th><th>來源</th><th></th></tr></thead>
+      <tbody>
+        ${state.assets.length===0 ? `<tr><td colspan="6" style="text-align:center; color:var(--ink-soft); padding:30px;">目前沒有符合條件的資產</td></tr>` : state.assets.map(a=>`
+          <tr class="row-clickable" data-action="open-asset" data-id="${a.id}">
+            <td class="case-no">${a.asset_no}</td>
+            <td>${a.name}</td>
+            <td>${a.store_name||''}</td>
+            <td><span class="status-pill">${ASSET_STATUS_LABEL[a.status]||a.status}</span></td>
+            <td style="font-size:12px; color:var(--ink-soft);">${a.source==='used'?'二手':(a.source==='new'?'新購':'—')}</td>
+            <td>›</td>
+          </tr>`).join("")}
+      </tbody>
+    </table>
+  </div>`;
+}
+
+function renderAssetDetail(){
+  const a = state.currentAsset;
+  const isNew = !a.id;
+  const storeOptions = state.stores.filter(s=>s.status==='active').map(s=>`<option value="${s.id}" ${a.store_id===s.id?'selected':''}>${s.code?('['+s.code+'] '):''}${s.name}</option>`).join("");
+  const majorOptions = state.assetMajorCategories.map(m=>`<option value="${m.code}" ${a.major_code===m.code?'selected':''}>${m.code} ${m.name}</option>`).join("");
+
+  return `
+  <div class="grid grid-2" style="align-items:start;">
+    <div class="card">
+      <div class="section-title" style="margin-top:0;">${isNew?'新增資產':'基本資料'}</div>
+      <label class="field-label">資產編號${isNew?'（依規則自訂，例：C002-17-001-0001）':''}</label>
+      <input type="text" id="asset-no" value="${a.asset_no||''}" ${isNew?'':'readonly'}>
+      <label class="field-label">資產名稱</label>
+      <input type="text" id="asset-name" value="${a.name||''}">
+      <div class="grid grid-2">
+        <div><label class="field-label">設備大類</label>
+          <select id="asset-major"><option value="">—</option>${majorOptions}</select>
+        </div>
+        <div><label class="field-label">中類代碼（選填）</label>
+          <input type="text" id="asset-minor-code" value="${a.minor_code_display||''}" placeholder="例如：001">
+        </div>
+      </div>
+      <div class="grid grid-2">
+        <div><label class="field-label">品牌</label><input type="text" id="asset-brand" value="${a.brand||''}"></div>
+        <div><label class="field-label">型號</label><input type="text" id="asset-model" value="${a.model||''}"></div>
+      </div>
+      <label class="field-label">序號</label>
+      <input type="text" id="asset-serial" value="${a.serial_no||''}">
+      <label class="field-label">來源</label>
+      <select id="asset-source">
+        <option value="">—</option>
+        <option value="new" ${a.source==='new'?'selected':''}>新購</option>
+        <option value="used" ${a.source==='used'?'selected':''}>二手</option>
+      </select>
+      <label class="field-label">所在門市</label>
+      <select id="asset-store"><option value="">— 未指定 —</option>${storeOptions}</select>
+      <label class="field-label">設備狀態</label>
+      <select id="asset-status">
+        ${Object.keys(ASSET_STATUS_LABEL).map(k=>`<option value="${k}" ${(a.status||'in_use')===k?'selected':''}>${ASSET_STATUS_LABEL[k]}</option>`).join("")}
+      </select>
+    </div>
+
+    <div class="card">
+      <div class="section-title" style="margin-top:0;">購買與保固資訊（選填）</div>
+      <div class="grid grid-2">
+        <div><label class="field-label">購買日期</label><input type="date" id="asset-purchase-date" value="${a.purchase_date||''}"></div>
+        <div><label class="field-label">購買價格</label><input type="number" id="asset-purchase-price" value="${a.purchase_price||''}"></div>
+      </div>
+      <label class="field-label">供應商</label>
+      <input type="text" id="asset-supplier" value="${a.supplier||''}">
+      <label class="field-label">保固期限</label>
+      <input type="date" id="asset-warranty" value="${a.warranty_until||''}">
+      <label class="field-label">備註</label>
+      <textarea id="asset-notes">${a.notes||''}</textarea>
+      ${state.assetFormError ? `<div class="error-msg">${state.assetFormError}</div>` : ""}
+      <button class="btn btn-primary" style="margin-top:12px;" data-action="save-asset">${isNew?'新增資產':'儲存變更'}</button>
+    </div>
   </div>`;
 }
 
@@ -572,6 +758,74 @@ function renderVendors(){
   </div>`;
 }
 
+/* ---------------- 廠商指派規則 ---------------- */
+function renderAssignmentRules(){
+  const f = state.assignmentFilters;
+  const storeOptions = state.stores.filter(s=>s.status==='active').map(s=>`<option value="${s.id}" ${f.storeId===s.id?'selected':''}>${s.code?('['+s.code+'] '):''}${s.name}</option>`).join("");
+  const vendorOptions = state.vendors.map(v=>`<option value="${v.id}">${v.name}</option>`).join("");
+
+  if(!f.storeId){
+    return `
+    <div class="card">
+      <p style="font-size:13px; color:var(--ink-soft); margin:0 0 12px;">請先選擇門市，查看該門市的廠商指派規則（一次只顯示一間門市，避免列表過長）。</p>
+      <select id="rule-filter-store" style="max-width:320px;">
+        <option value="">請選擇門市…</option>${storeOptions}
+      </select>
+      <button class="btn btn-outline btn-sm" data-action="apply-rule-filters" style="margin-left:8px;">查看</button>
+    </div>`;
+  }
+
+  const rows = state.assignmentRules;
+  return `
+  <div class="filter-bar">
+    <select id="rule-filter-store">${storeOptions}</select>
+    <select id="rule-filter-confirm">
+      <option value="">全部狀態</option>
+      <option value="pending" ${f.confirmStatus==='pending'?'selected':''}>待確認</option>
+      <option value="confirmed" ${f.confirmStatus==='confirmed'?'selected':''}>已確認</option>
+    </select>
+    <button class="btn btn-outline btn-sm" data-action="apply-rule-filters">套用篩選</button>
+  </div>
+
+  <div class="card">
+    <div class="section-title" style="margin-top:0;">新增規則</div>
+    <div class="grid grid-4">
+      <div><label class="field-label">類別</label><input type="text" id="new-rule-category" placeholder="例如：空調"></div>
+      <div><label class="field-label">廠商</label><select id="new-rule-vendor"><option value="">請選擇…</option>${vendorOptions}</select></div>
+      <div><label class="field-label">優先順序</label><input type="number" id="new-rule-priority" value="1"></div>
+      <div><label class="field-label">備註</label><input type="text" id="new-rule-note"></div>
+    </div>
+    ${state.assignmentFormError ? `<div class="error-msg">${state.assignmentFormError}</div>` : ""}
+    <button class="btn btn-primary btn-sm" style="margin-top:10px;" data-action="add-rule">新增</button>
+  </div>
+
+  <div class="card" style="padding:0; overflow-x:auto; margin-top:14px;">
+    <table>
+      <thead><tr><th>類別</th><th>廠商</th><th>優先</th><th>備註</th><th>確認狀態</th><th></th></tr></thead>
+      <tbody>
+        ${rows.length===0 ? `<tr><td colspan="6" style="text-align:center; color:var(--ink-soft); padding:30px;">此門市尚無廠商指派規則</td></tr>` : rows.map(r=>`
+          <tr data-rule-row="${r.id}">
+            <td><input type="text" data-field="category" value="${r.category||''}" style="min-width:100px;"></td>
+            <td>
+              <select data-field="vendor_id" style="min-width:140px;">
+                ${vendorOptions.replace(`value="${r.vendor_id}"`, `value="${r.vendor_id}" selected`)}
+              </select>
+            </td>
+            <td><input type="number" data-field="priority" value="${r.priority||1}" style="width:60px;"></td>
+            <td><input type="text" data-field="note" value="${r.note||''}" style="min-width:160px;"></td>
+            <td>
+              <select data-field="confirm_status">
+                <option value="pending" ${r.confirm_status==='pending'?'selected':''}>待確認</option>
+                <option value="confirmed" ${r.confirm_status==='confirmed'?'selected':''}>已確認</option>
+              </select>
+            </td>
+            <td><button class="btn btn-primary btn-sm" data-action="save-rule" data-id="${r.id}">儲存</button></td>
+          </tr>`).join("")}
+      </tbody>
+    </table>
+  </div>`;
+}
+
 /* ============================================================
    事件綁定
    ============================================================ */
@@ -606,6 +860,16 @@ async function onAction(e){
   else if(action === "quick-add-vendor"){ await quickAddVendor(); }
   else if(action === "save-account"){ await saveAccount(el.dataset.id); }
   else if(action === "add-vendor"){ await addVendor(); }
+  else if(action === "add-region"){ await addRegion(); }
+  else if(action === "add-store"){ await addStore(); }
+  else if(action === "apply-rule-filters"){ await applyRuleFilters(); }
+  else if(action === "add-rule"){ await addRule(); }
+  else if(action === "save-rule"){ await saveRule(el.dataset.id); }
+  else if(action === "save-store"){ await saveStore(el.dataset.id); }
+  else if(action === "apply-asset-filters"){ await applyAssetFilters(); }
+  else if(action === "open-asset"){ await openAsset(el.dataset.id); }
+  else if(action === "new-asset"){ newAssetForm(); }
+  else if(action === "save-asset"){ await saveAsset(); }
 }
 
 /* ============================================================
@@ -639,6 +903,7 @@ async function afterLogin(){
   }
   state.profile = profile;
   await loadStores();
+  await loadRegions();
   await loadVendors();
   await goTo("dashboard");
 }
@@ -647,17 +912,117 @@ async function afterLogin(){
    資料載入
    ============================================================ */
 async function loadStores(){
-  const { data } = await sb.from("stores").select("id, name, code").eq("status","active").order("code");
+  const { data } = await sb.from("stores").select("id, name, code, region_id, status, is_central_unit").order("code");
   state.stores = data || [];
+}
+async function loadRegions(){
+  const { data } = await sb.from("regions").select("*").order("name");
+  state.regions = data || [];
 }
 async function loadVendors(){
   const { data } = await sb.from("vendors").select("*").order("name");
   state.vendors = data || [];
 }
 
+async function loadAssetMajorCategories(){
+  const { data } = await sb.from("asset_major_categories").select("*").order("code");
+  state.assetMajorCategories = data || [];
+}
+
+async function loadAssets(){
+  const f = state.assetFilters;
+  let q = sb.from("assets").select("*, stores(name)").order("asset_no").limit(300);
+  if(f.storeId) q = q.eq("store_id", f.storeId);
+  if(f.majorCode) q = q.eq("major_code", f.majorCode);
+  if(f.q) q = q.or(`name.ilike.%${f.q}%,asset_no.ilike.%${f.q}%`);
+  const { data, error } = await q;
+  if(error){ alert("載入失敗：" + error.message); return; }
+  state.assets = (data||[]).map(a=>({ ...a, store_name: a.stores?.name || "" }));
+}
+
+async function applyAssetFilters(){
+  state.assetFilters.storeId = document.getElementById("asset-filter-store")?.value || "";
+  state.assetFilters.majorCode = document.getElementById("asset-filter-major")?.value || "";
+  state.assetFilters.q = document.getElementById("asset-filter-q")?.value || "";
+  await loadAssets();
+  render();
+}
+
+async function openAsset(id){
+  const { data, error } = await sb.from("assets").select("*").eq("id", id).single();
+  if(error){ alert("載入失敗：" + error.message); return; }
+  state.currentAsset = data;
+  state.assetFormError = "";
+  state.view = "asset-detail";
+  render();
+}
+
+function newAssetForm(){
+  state.currentAsset = { id:null, asset_no:"", name:"", major_code:"", store_id:"", status:"in_use", source:"" };
+  state.assetFormError = "";
+  state.view = "asset-detail";
+  render();
+}
+
+async function saveAsset(){
+  const a = state.currentAsset;
+  const assetNo = document.getElementById("asset-no").value.trim();
+  const name = document.getElementById("asset-name").value.trim();
+  if(!assetNo || !name){ state.assetFormError = "請填寫資產編號與名稱"; render(); return; }
+
+  const majorCode = document.getElementById("asset-major").value || null;
+  const minorCodeInput = document.getElementById("asset-minor-code").value.trim();
+  let minorCategoryId = null;
+  if(majorCode && minorCodeInput){
+    minorCategoryId = await findOrCreateMinorCategory(majorCode, minorCodeInput);
+  }
+
+  const payload = {
+    asset_no: assetNo,
+    name,
+    major_code: majorCode,
+    minor_category_id: minorCategoryId,
+    brand: document.getElementById("asset-brand").value || null,
+    model: document.getElementById("asset-model").value || null,
+    serial_no: document.getElementById("asset-serial").value || null,
+    source: document.getElementById("asset-source").value || null,
+    store_id: document.getElementById("asset-store").value || null,
+    status: document.getElementById("asset-status").value,
+    purchase_date: document.getElementById("asset-purchase-date").value || null,
+    purchase_price: numOrNull(document.getElementById("asset-purchase-price").value),
+    supplier: document.getElementById("asset-supplier").value || null,
+    warranty_until: document.getElementById("asset-warranty").value || null,
+    notes: document.getElementById("asset-notes").value || null,
+    updated_at: new Date().toISOString()
+  };
+
+  let error;
+  if(a.id){
+    ({ error } = await sb.from("assets").update(payload).eq("id", a.id));
+  }else{
+    ({ error } = await sb.from("assets").insert(payload));
+  }
+  if(error){ state.assetFormError = "儲存失敗：" + error.message; render(); return; }
+  await loadAssets();
+  state.view = "assets";
+  render();
+}
+
+async function findOrCreateMinorCategory(majorCode, code){
+  const { data: existing } = await sb.from("asset_minor_categories").select("id").eq("major_code", majorCode).eq("code", code).maybeSingle();
+  if(existing) return existing.id;
+  const { data: created, error } = await sb.from("asset_minor_categories").insert({ major_code: majorCode, code, name: code }).select().single();
+  if(error) return null;
+  return created.id;
+}
+
 function scopedCaseQuery(query){
   const p = state.profile;
   if(p.role === "store" && p.store_id) return query.eq("store_id", p.store_id);
+  if(p.role === "district_manager" && p.region_id){
+    const storeIds = state.stores.filter(s=>s.region_id === p.region_id).map(s=>s.id);
+    return query.in("store_id", storeIds.length ? storeIds : ["00000000-0000-0000-0000-000000000000"]);
+  }
   return query;
 }
 
@@ -733,8 +1098,11 @@ async function goTo(view){
   state.view = view;
   if(view === "dashboard") await loadDashboard();
   else if(view === "case-list") await loadCases();
-  else if(view === "accounts") await loadAccounts();
+  else if(view === "assets"){ await loadAssetMajorCategories(); await loadAssets(); }
+  else if(view === "stores"){ await loadRegions(); await loadStores(); }
+  else if(view === "accounts"){ await loadRegions(); await loadAccounts(); }
   else if(view === "vendors") await loadVendors();
+  else if(view === "assignment-rules") await loadVendors();
   render();
 }
 
@@ -810,7 +1178,7 @@ function numOrNull(v){ return v === "" || v === null || v === undefined ? null :
 
 function copyCaseInfo(){
   const c = state.currentCase;
-  const text = [
+  const lines = [
     `店鋪：${c.store_name}`,
     `報告日期：${c.report_date||''}`,
     `報修設備：${c.fault_category||''}`,
@@ -819,9 +1187,19 @@ function copyCaseInfo(){
     `目前狀況：${c.fault_description||''}`,
     `現場報修人：${c.reporter_name||''}`,
     `聯絡電話：${c.reporter_phone||''}`
-  ].join("\n");
+  ];
+
+  if(state.caseAttachments.length > 0){
+    lines.push("");
+    lines.push("【照片／影片／文件】");
+    state.caseAttachments.forEach(a=>{
+      lines.push(`${ATTACH_CATEGORY_LABEL[a.category]||a.category}：${a.file_path}`);
+    });
+  }
+
+  const text = lines.join("\n");
   navigator.clipboard.writeText(text).then(()=>{
-    alert("已複製到剪貼簿，可直接貼到 LINE");
+    alert("已複製到剪貼簿（含照片連結），可直接貼到 LINE");
   }).catch(()=>{
     prompt("請手動複製以下內容：", text);
   });
@@ -881,10 +1259,47 @@ async function saveAccount(id){
   const row = document.querySelector(`tr[data-account-row="${id}"]`);
   const role = row.querySelector('[data-field="role"]').value;
   const storeId = row.querySelector('[data-field="store_id"]').value || null;
+  const regionId = row.querySelector('[data-field="region_id"]').value || null;
   const status = row.querySelector('[data-field="status"]').value;
-  const { error } = await sb.from("users_profile").update({ role, store_id: storeId, status }).eq("id", id);
+  const { error } = await sb.from("users_profile").update({ role, store_id: storeId, region_id: regionId, status }).eq("id", id);
   if(error){ alert("儲存失敗：" + error.message); return; }
   await loadAccounts();
+  render();
+}
+
+/* ============================================================
+   門市／區域管理
+   ============================================================ */
+async function addRegion(){
+  const name = document.getElementById("new-region-name").value.trim();
+  if(!name){ state.storeFormError = "請輸入區域名稱"; render(); return; }
+  const { error } = await sb.from("regions").insert({ name });
+  if(error){ state.storeFormError = "新增失敗：" + error.message; render(); return; }
+  state.storeFormError = "";
+  await loadRegions();
+  render();
+}
+
+async function addStore(){
+  const code = document.getElementById("new-store-code").value.trim();
+  const name = document.getElementById("new-store-name").value.trim();
+  const regionId = document.getElementById("new-store-region").value || null;
+  const isCentral = document.getElementById("new-store-central").checked;
+  if(!code || !name){ state.storeFormError = "請輸入門市代碼與名稱"; render(); return; }
+  const { error } = await sb.from("stores").insert({ code, name, region_id: regionId, is_central_unit: isCentral, status:"active" });
+  if(error){ state.storeFormError = "新增失敗：" + error.message; render(); return; }
+  state.storeFormError = "";
+  await loadStores();
+  render();
+}
+
+async function saveStore(id){
+  const row = document.querySelector(`tr[data-store-row="${id}"]`);
+  const regionId = row.querySelector('[data-field="region_id"]').value || null;
+  const status = row.querySelector('[data-field="status"]').value;
+  const { error } = await sb.from("stores").update({ region_id: regionId, status }).eq("id", id);
+  if(error){ alert("儲存失敗：" + error.message); return; }
+  await loadStores();
   render();
 }
 
@@ -907,6 +1322,57 @@ async function addVendor(){
   if(error){ state.vendorFormError = "新增失敗：" + error.message; render(); return; }
   state.vendorFormError = "";
   await loadVendors();
+  render();
+}
+
+/* ============================================================
+   廠商指派規則
+   ============================================================ */
+async function applyRuleFilters(){
+  state.assignmentFilters.storeId = document.getElementById("rule-filter-store")?.value || "";
+  state.assignmentFilters.confirmStatus = document.getElementById("rule-filter-confirm")?.value || "";
+  if(state.assignmentFilters.storeId) await loadAssignmentRules();
+  render();
+}
+
+async function loadAssignmentRules(){
+  const f = state.assignmentFilters;
+  let q = sb.from("vendor_assignment_rules").select("*").eq("scope_type","store").eq("store_id", f.storeId).order("category").order("priority");
+  if(f.confirmStatus) q = q.eq("confirm_status", f.confirmStatus);
+  const { data, error } = await q;
+  if(error){ alert("載入失敗：" + error.message); return; }
+  state.assignmentRules = data || [];
+}
+
+async function addRule(){
+  const category = document.getElementById("new-rule-category").value.trim();
+  const vendorId = document.getElementById("new-rule-vendor").value;
+  if(!category || !vendorId){ state.assignmentFormError = "請填寫類別並選擇廠商"; render(); return; }
+  const payload = {
+    category, scope_type:"store", store_id: state.assignmentFilters.storeId, vendor_id: vendorId,
+    priority: Number(document.getElementById("new-rule-priority").value) || 1,
+    note: document.getElementById("new-rule-note").value || null,
+    confirm_status: "confirmed"
+  };
+  const { error } = await sb.from("vendor_assignment_rules").insert(payload);
+  if(error){ state.assignmentFormError = "新增失敗：" + error.message; render(); return; }
+  state.assignmentFormError = "";
+  await loadAssignmentRules();
+  render();
+}
+
+async function saveRule(id){
+  const row = document.querySelector(`tr[data-rule-row="${id}"]`);
+  const payload = {
+    category: row.querySelector('[data-field="category"]').value,
+    vendor_id: row.querySelector('[data-field="vendor_id"]').value,
+    priority: Number(row.querySelector('[data-field="priority"]').value) || 1,
+    note: row.querySelector('[data-field="note"]').value || null,
+    confirm_status: row.querySelector('[data-field="confirm_status"]').value
+  };
+  const { error } = await sb.from("vendor_assignment_rules").update(payload).eq("id", id);
+  if(error){ alert("儲存失敗：" + error.message); return; }
+  await loadAssignmentRules();
   render();
 }
 

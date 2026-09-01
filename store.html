@@ -7,6 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=JetBrains+Mono:wght@500;700&family=Noto+Sans+TC:wght@400;500;700;900&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <style>
   :root{
     --bg:#EEF2F6;
@@ -188,6 +189,12 @@
   .login-switch a{ color:var(--primary); font-weight:700; text-decoration:none; cursor:pointer; }
   .logout-link{ font-size:12px; color:var(--ink-soft); cursor:pointer; text-decoration:underline; font-family:"JetBrains Mono",monospace; }
   .top-right{ margin-left:auto; }
+  .version-badge{
+    position:fixed; bottom:8px; right:10px; z-index:9999; pointer-events:none;
+    font-family:"JetBrains Mono",monospace; font-size:10px; letter-spacing:.03em;
+    color:var(--ink-soft); background:var(--surface); border:1px solid var(--border);
+    padding:2px 7px; border-radius:5px; opacity:.75;
+  }
 </style>
 </head>
 <body>
@@ -196,6 +203,7 @@
     載入中…如果這段文字一直沒有消失，代表網頁程式無法執行，請截圖回報。
   </div>
 </div>
+<div class="version-badge">store v2026-09-01.1</div>
 
 <script>
 /* ============================================================
@@ -269,6 +277,15 @@ let state = {
   cases: [],
   currentCase: null,
   caseUploadMarks: {},
+  setup: {
+    view: "menu",
+    regions: [], assetMajorCategories: [], allStores: [],
+    newStore: { code:"", name:"", regionId:"" }, storeFormError:"", lastCreatedStoreId:"",
+    newAsset: { storeId:"", assetNo:"", name:"", majorCode:"", minorCode:"", brand:"", model:"", serialNo:"", source:"" },
+    assetFormError:"", assetSessionCount:0, sessionAssets:[],
+    newInfra: { storeId:"", itemType:"", description:"", relatedArea:"", photoFile:null, photoPreviewUrl:null },
+    infraFormError:"", infraSessionCount:0,
+  },
 };
 
 const app = document.getElementById("app");
@@ -286,6 +303,10 @@ function render(){
   else if(state.view === "new-report-success") app.innerHTML = renderSuccess();
   else if(state.view === "my-cases") app.innerHTML = renderMyCases();
   else if(state.view === "case-detail") app.innerHTML = renderCaseDetail();
+  else if(state.view === "setup-menu") app.innerHTML = renderSetupMenu();
+  else if(state.view === "setup-new-store") app.innerHTML = renderSetupNewStore();
+  else if(state.view === "setup-new-asset") app.innerHTML = renderSetupNewAsset();
+  else if(state.view === "setup-new-infra") app.innerHTML = renderSetupNewInfra();
   bindEvents();
 }
 
@@ -366,6 +387,7 @@ function renderProfileMissing(){
 }
 function renderHome(){
   const notStoreAccount = state.profile && state.profile.role !== "store";
+  const canSetup = state.profile && ["general_affairs","admin"].includes(state.profile.role);
   return `
   <header class="topbar"><h1>🔧 總務報修系統</h1><span class="top-right logout-link" data-action="do-logout">LOGOUT</span></header>
   <main>
@@ -384,6 +406,11 @@ function renderHome(){
         <div class="ico">📁</div>
         <div class="txt"><strong>我的案件</strong><span>查看進度、補件、確認完修</span></div>
       </div>
+      ${canSetup ? `
+      <div class="cta" data-action="go-setup-menu" style="border-left:4px solid var(--warn);">
+        <div class="ico">🏗️</div>
+        <div class="txt"><strong>新門市建檔</strong><span>新增門市、資產、基礎設施照片</span></div>
+      </div>` : ""}
     </div>
   </main>`;
 }
@@ -594,6 +621,137 @@ function renderCaseDetail(){
   </main>`;
 }
 
+/* ---------------- 新門市建檔：選單 ---------------- */
+function renderSetupMenu(){
+  return `
+  <header class="topbar">
+    <span class="back" data-action="go-home">‹</span>
+    <h1>新門市建檔</h1>
+  </header>
+  <main>
+    <div class="cta-grid">
+      <div class="cta" data-action="go-setup-new-store">
+        <div class="ico">🏬</div>
+        <div class="txt"><strong>新增門市</strong><span>建立門市代碼、名稱、區域</span></div>
+      </div>
+      <div class="cta" data-action="go-setup-new-asset">
+        <div class="ico">🧊</div>
+        <div class="txt"><strong>新增資產</strong><span>逐筆登記設備，可連續新增</span></div>
+      </div>
+      <div class="cta" data-action="go-setup-new-infra">
+        <div class="ico">🔌</div>
+        <div class="txt"><strong>門市基礎設施</strong><span>配電、總電源、冷氣型式等拍照存檔</span></div>
+      </div>
+    </div>
+  </main>`;
+}
+
+/* ---------------- 新門市建檔：新增門市 ---------------- */
+function renderSetupNewStore(){
+  const s = state.setup;
+  const regionOptions = s.regions.map(r=>`<option value="${r.id}" ${s.newStore.regionId===r.id?'selected':''}>${r.name}</option>`).join("");
+  return `
+  <header class="topbar">
+    <span class="back" data-action="go-setup-menu">‹</span>
+    <h1>新增門市</h1>
+  </header>
+  <main>
+    <label class="field-label">門市代碼</label>
+    <input type="text" id="su-store-code" value="${s.newStore.code}" placeholder="例如：040">
+    <label class="field-label">門市名稱</label>
+    <input type="text" id="su-store-name" value="${s.newStore.name}" placeholder="例如：新莊中港">
+    <label class="field-label">所屬區域</label>
+    <select id="su-store-region"><option value="">— 未指定 —</option>${regionOptions}</select>
+    ${s.storeFormError ? `<div class="error-msg">${s.storeFormError}</div>` : ""}
+    ${s.lastCreatedStoreId ? `<div class="success-msg" style="margin-top:12px;">✅ 門市已建立，可以接著去「新增資產」登記設備。</div>` : ""}
+  </main>
+  <div class="footer-actions"><div class="inner">
+    <button class="btn btn-primary" data-action="submit-new-store">建立門市</button>
+  </div></div>`;
+}
+
+/* ---------------- 新門市建檔：新增資產 ---------------- */
+function renderSetupNewAsset(){
+  const s = state.setup;
+  const storeOptions = s.allStores.map(st=>`<option value="${st.id}" ${s.newAsset.storeId===st.id?'selected':''}>${st.code?('['+st.code+'] '):''}${st.name}</option>`).join("");
+  const majorOptions = s.assetMajorCategories.map(m=>`<option value="${m.code}" ${s.newAsset.majorCode===m.code?'selected':''}>${m.code} ${m.name}</option>`).join("");
+  return `
+  <header class="topbar">
+    <span class="back" data-action="go-setup-menu">‹</span>
+    <h1>新增資產</h1>
+  </header>
+  <main>
+    ${s.assetSessionCount > 0 ? `
+      <div class="success-msg">
+        本次已新增 ${s.assetSessionCount} 筆
+        <span style="margin-left:10px; text-decoration:underline; cursor:pointer;" data-action="export-session-assets">📤 匯出成 Excel</span>
+      </div>` : ""}
+    <label class="field-label">所在門市</label>
+    <select id="su-asset-store"><option value="">請選擇門市…</option>${storeOptions}</select>
+    <label class="field-label">資產編號（選填，可依規則自訂）</label>
+    <input type="text" id="su-asset-no" value="${s.newAsset.assetNo}" placeholder="例如：C040-26-001-0001">
+    <label class="field-label">資產名稱</label>
+    <input type="text" id="su-asset-name" value="${s.newAsset.name}" placeholder="例如：十五人電飯鍋">
+    <div class="grid-2-mobile" style="display:flex; gap:10px;">
+      <div style="flex:1;"><label class="field-label">大類</label><select id="su-asset-major"><option value="">—</option>${majorOptions}</select></div>
+      <div style="flex:1;"><label class="field-label">中類代碼</label><input type="text" id="su-asset-minor" value="${s.newAsset.minorCode}" placeholder="例如：001"></div>
+    </div>
+    <label class="field-label">品牌</label>
+    <input type="text" id="su-asset-brand" value="${s.newAsset.brand}">
+    <label class="field-label">型號</label>
+    <input type="text" id="su-asset-model" value="${s.newAsset.model}">
+    <label class="field-label">來源</label>
+    <select id="su-asset-source">
+      <option value="">—</option>
+      <option value="new" ${s.newAsset.source==='new'?'selected':''}>新購</option>
+      <option value="used" ${s.newAsset.source==='used'?'selected':''}>二手</option>
+    </select>
+    ${s.assetFormError ? `<div class="error-msg">${s.assetFormError}</div>` : ""}
+  </main>
+  <div class="footer-actions"><div class="inner">
+    <button class="btn btn-primary" data-action="submit-new-asset">新增並繼續下一筆</button>
+  </div></div>`;
+}
+
+/* ---------------- 新門市建檔：門市基礎設施 ---------------- */
+function renderSetupNewInfra(){
+  const s = state.setup;
+  const storeOptions = s.allStores.map(st=>`<option value="${st.id}" ${s.newInfra.storeId===st.id?'selected':''}>${st.code?('['+st.code+'] '):''}${st.name}</option>`).join("");
+  const typeLabel = {
+    wiring_diagram:"配電線路圖", main_power_location:"總電源位置", breaker_mapping:"分路開關對應",
+    ac_type_location:"冷氣型式與位置", gas_main_valve:"瓦斯總開關", other:"其他"
+  };
+  return `
+  <header class="topbar">
+    <span class="back" data-action="go-setup-menu">‹</span>
+    <h1>門市基礎設施</h1>
+  </header>
+  <main>
+    ${s.infraSessionCount > 0 ? `<div class="success-msg">本次已新增 ${s.infraSessionCount} 筆</div>` : ""}
+    <label class="field-label">門市</label>
+    <select id="su-infra-store"><option value="">請選擇門市…</option>${storeOptions}</select>
+    <label class="field-label">項目類型</label>
+    <select id="su-infra-type">
+      <option value="">請選擇…</option>
+      ${Object.keys(typeLabel).map(k=>`<option value="${k}" ${s.newInfra.itemType===k?'selected':''}>${typeLabel[k]}</option>`).join("")}
+    </select>
+    <label class="field-label">說明文字</label>
+    <textarea id="su-infra-desc" placeholder="例如：總開關位於吧台後方牆面，黑色鐵箱">${s.newInfra.description}</textarea>
+    <label class="field-label">對應設備/區域（選填）</label>
+    <input type="text" id="su-infra-area" value="${s.newInfra.relatedArea}" placeholder="例如：廚房插座">
+    <label class="field-label">照片</label>
+    <div class="upload-grid" style="grid-template-columns:repeat(3,1fr); max-width:220px;">
+      <div class="upload-slot" data-action="upload-infra-photo">
+        ${s.newInfra.photoPreviewUrl ? `<img src="${s.newInfra.photoPreviewUrl}">` : "＋"}
+      </div>
+    </div>
+    ${s.infraFormError ? `<div class="error-msg">${s.infraFormError}</div>` : ""}
+  </main>
+  <div class="footer-actions"><div class="inner">
+    <button class="btn btn-primary" data-action="submit-new-infra">新增並繼續下一筆</button>
+  </div></div>`;
+}
+
 /* ============================================================
    事件綁定與資料存取
    ============================================================ */
@@ -623,6 +781,33 @@ function bindEvents(){
     const el = document.getElementById(id);
     if(el) el.addEventListener("input", ()=>{ state.newReport[fieldMap[id]] = el.value; });
   });
+
+  // 新門市建檔各表單：同樣做即時同步，避免上傳照片等操作導致重新渲染時遺失已輸入內容
+  const setupFieldMap = {
+    "su-store-code": ["newStore","code"], "su-store-name": ["newStore","name"],
+    "su-asset-no": ["newAsset","assetNo"], "su-asset-name": ["newAsset","name"],
+    "su-asset-minor": ["newAsset","minorCode"], "su-asset-brand": ["newAsset","brand"], "su-asset-model": ["newAsset","model"],
+    "su-infra-desc": ["newInfra","description"], "su-infra-area": ["newInfra","relatedArea"]
+  };
+  Object.keys(setupFieldMap).forEach(id=>{
+    const el = document.getElementById(id);
+    if(el){
+      const [group, field] = setupFieldMap[id];
+      el.addEventListener("input", ()=>{ state.setup[group][field] = el.value; });
+    }
+  });
+  const suStoreRegion = document.getElementById("su-store-region");
+  if(suStoreRegion) suStoreRegion.addEventListener("change", ()=>{ state.setup.newStore.regionId = suStoreRegion.value; });
+  const suAssetStore = document.getElementById("su-asset-store");
+  if(suAssetStore) suAssetStore.addEventListener("change", ()=>{ state.setup.newAsset.storeId = suAssetStore.value; });
+  const suAssetMajor = document.getElementById("su-asset-major");
+  if(suAssetMajor) suAssetMajor.addEventListener("change", ()=>{ state.setup.newAsset.majorCode = suAssetMajor.value; });
+  const suAssetSource = document.getElementById("su-asset-source");
+  if(suAssetSource) suAssetSource.addEventListener("change", ()=>{ state.setup.newAsset.source = suAssetSource.value; });
+  const suInfraStore = document.getElementById("su-infra-store");
+  if(suInfraStore) suInfraStore.addEventListener("change", ()=>{ state.setup.newInfra.storeId = suInfraStore.value; });
+  const suInfraType = document.getElementById("su-infra-type");
+  if(suInfraType) suInfraType.addEventListener("change", ()=>{ state.setup.newInfra.itemType = suInfraType.value; });
 }
 
 /* ============================================================
@@ -670,6 +855,10 @@ fileInput.addEventListener("change", async (e)=>{
     }catch(err){
       alert("上傳失敗：" + err.message);
     }
+  }else if(target.mode === "infra-photo"){
+    state.setup.newInfra.photoFile = file;
+    state.setup.newInfra.photoPreviewUrl = file.type.startsWith("image") ? URL.createObjectURL(file) : null;
+    render();
   }
 });
 
@@ -744,6 +933,29 @@ async function onAction(e){
     fileTarget = { mode:"case-upload", index: Number(el.dataset.index), caseId: state.currentCase.id, category:"after_repair_photo", markKey:"after" };
     fileInput.click();
   }
+  else if(action === "go-setup-menu"){ state.view = "setup-menu"; render(); }
+  else if(action === "go-setup-new-store"){
+    await loadRegionsForSetup();
+    state.setup.storeFormError = ""; state.setup.lastCreatedStoreId = "";
+    state.view = "setup-new-store"; render();
+  }
+  else if(action === "go-setup-new-asset"){
+    await loadAllStoresForSetup();
+    await loadAssetMajorCategoriesForSetup();
+    state.view = "setup-new-asset"; render();
+  }
+  else if(action === "go-setup-new-infra"){
+    await loadAllStoresForSetup();
+    state.view = "setup-new-infra"; render();
+  }
+  else if(action === "submit-new-store"){ await submitNewStore(); }
+  else if(action === "submit-new-asset"){ await submitNewAsset(); }
+  else if(action === "submit-new-infra"){ await submitNewInfra(); }
+  else if(action === "upload-infra-photo"){
+    fileTarget = { mode:"infra-photo" };
+    fileInput.click();
+  }
+  else if(action === "export-session-assets"){ exportSessionAssets(); }
 }
 
 function resetNewReport(){
@@ -930,6 +1142,159 @@ async function loadGeneralCategories(){
     state.generalCategories = data.map(r=>r.name);
   }
   // 若資料庫尚未建表或查詢失敗，renderNewReport 會自動退回內建的預設清單，不會讓畫面空白
+}
+
+/* ============================================================
+   新門市建檔：資料載入與送出
+   ============================================================ */
+async function loadRegionsForSetup(){
+  const { data } = await sb.from("regions").select("id, name").order("name");
+  state.setup.regions = data || [];
+}
+
+async function loadAllStoresForSetup(){
+  const { data } = await sb.from("stores").select("id, name, code").eq("status","active").order("code");
+  state.setup.allStores = data || [];
+}
+
+async function loadAssetMajorCategoriesForSetup(){
+  const { data } = await sb.from("asset_major_categories").select("*").order("code");
+  state.setup.assetMajorCategories = data || [];
+}
+
+async function submitNewStore(){
+  const su = state.setup;
+  const code = document.getElementById("su-store-code").value.trim();
+  const name = document.getElementById("su-store-name").value.trim();
+  const regionId = document.getElementById("su-store-region").value || null;
+  if(!code || !name){ su.storeFormError = "請填寫門市代碼與名稱"; render(); return; }
+
+  const { data, error } = await sb.from("stores").insert({ code, name, region_id: regionId, status:"active" }).select().single();
+  if(error){ su.storeFormError = "建立失敗：" + error.message; render(); return; }
+
+  su.storeFormError = "";
+  su.lastCreatedStoreId = data.id;
+  su.newStore = { code:"", name:"", regionId:"" };
+  su.newAsset.storeId = data.id; // 方便接下來直接去新增資產時預選這間店
+  su.newInfra.storeId = data.id;
+  render();
+}
+
+async function submitNewAsset(){
+  const su = state.setup;
+  const storeId = document.getElementById("su-asset-store").value;
+  const name = document.getElementById("su-asset-name").value.trim();
+  if(!storeId || !name){ su.assetFormError = "請選擇門市並填寫資產名稱"; render(); return; }
+
+  const assetNoInput = document.getElementById("su-asset-no").value.trim();
+  const majorCode = document.getElementById("su-asset-major").value || null;
+  const minorCode = document.getElementById("su-asset-minor").value.trim();
+
+  let minorCategoryId = null;
+  if(majorCode && minorCode){
+    const { data: existing } = await sb.from("asset_minor_categories").select("id").eq("major_code", majorCode).eq("code", minorCode).maybeSingle();
+    if(existing){ minorCategoryId = existing.id; }
+    else{
+      const { data: created } = await sb.from("asset_minor_categories").insert({ major_code: majorCode, code: minorCode, name: minorCode }).select().single();
+      minorCategoryId = created?.id || null;
+    }
+  }
+
+  const payload = {
+    asset_no: assetNoInput || `TEMP-${Date.now()}`,
+    name,
+    major_code: majorCode,
+    minor_category_id: minorCategoryId,
+    brand: document.getElementById("su-asset-brand").value || null,
+    model: document.getElementById("su-asset-model").value || null,
+    source: document.getElementById("su-asset-source").value || null,
+    store_id: storeId,
+    status: "in_use"
+  };
+
+  const { error } = await sb.from("assets").insert(payload);
+  if(error){ su.assetFormError = "新增失敗：" + error.message; render(); return; }
+
+  su.assetFormError = "";
+  su.assetSessionCount += 1;
+  const storeInfo = su.allStores.find(st=>st.id===storeId);
+  su.sessionAssets.push({
+    asset_no: payload.asset_no, name, brand: payload.brand, model: payload.model,
+    source: payload.source, store_code: storeInfo?.code || "", store_name: storeInfo?.name || ""
+  });
+  // 保留門市選擇，清空其餘欄位方便連續輸入下一筆
+  su.newAsset = { storeId, assetNo:"", name:"", majorCode:"", minorCode:"", brand:"", model:"", serialNo:"", source:"" };
+  render();
+}
+
+function exportSessionAssets(){
+  const su = state.setup;
+  if(!su.sessionAssets.length){ alert("尚未新增任何資產，沒有可匯出的資料"); return; }
+  if(!window.XLSX){ alert("匯出功能載入失敗，請檢查網路連線後重新整理頁面再試一次"); return; }
+
+  // 依門市分組，每間門市各自一個工作表，方便工讀生對照原總表的門市分頁貼入
+  const groups = {};
+  su.sessionAssets.forEach(a=>{
+    const key = a.store_name || "未指定門市";
+    if(!groups[key]) groups[key] = [];
+    groups[key].push(a);
+  });
+
+  const wb = XLSX.utils.book_new();
+  Object.keys(groups).forEach(storeName=>{
+    const rows = groups[storeName].map(a=>({
+      "可直接貼入原總表A欄": `${a.asset_no}-${a.name}`,
+      "資產編號": a.asset_no,
+      "資產名稱": a.name,
+      "品牌": a.brand || "",
+      "型號": a.model || "",
+      "來源": a.source === "new" ? "新購" : (a.source === "used" ? "二手" : "")
+    }));
+    const ws = XLSX.utils.json_to_sheet(rows);
+    XLSX.utils.book_append_sheet(wb, ws, storeName.slice(0, 31));
+  });
+
+  const filename = `新增資產_${new Date().toISOString().slice(0,10)}.xlsx`;
+  XLSX.writeFile(wb, filename);
+}
+
+async function submitNewInfra(){
+  const su = state.setup;
+  const storeId = document.getElementById("su-infra-store").value;
+  const itemType = document.getElementById("su-infra-type").value;
+  const description = document.getElementById("su-infra-desc").value.trim();
+  if(!storeId || !itemType){ su.infraFormError = "請選擇門市與項目類型"; render(); return; }
+
+  let photoUrl = null;
+  if(su.newInfra.photoFile){
+    try{
+      const ext = (su.newInfra.photoFile.name.split(".").pop() || "jpg").toLowerCase();
+      const path = `store-infra/${storeId}/${Date.now()}-${Math.random().toString(36).slice(2,7)}.${ext}`;
+      const { error: upErr } = await sb.storage.from("attachments").upload(path, su.newInfra.photoFile);
+      if(upErr) throw upErr;
+      const { data: urlData } = sb.storage.from("attachments").getPublicUrl(path);
+      photoUrl = urlData.publicUrl;
+    }catch(err){
+      su.infraFormError = "照片上傳失敗：" + err.message;
+      render(); return;
+    }
+  }
+
+  const payload = {
+    store_id: storeId, item_type: itemType,
+    description: description || null,
+    related_area: document.getElementById("su-infra-area").value || null,
+    photo_url: photoUrl,
+    created_by: state.profile?.id || null
+  };
+
+  const { error } = await sb.from("store_infrastructure").insert(payload);
+  if(error){ su.infraFormError = "新增失敗：" + error.message; render(); return; }
+
+  su.infraFormError = "";
+  su.infraSessionCount += 1;
+  su.newInfra = { storeId, itemType:"", description:"", relatedArea:"", photoFile:null, photoPreviewUrl:null };
+  render();
 }
 
 async function doSignup(){
