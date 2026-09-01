@@ -7,6 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=JetBrains+Mono:wght@500;700&family=Noto+Sans+TC:wght@400;500;700;900&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <style>
   :root{
     --bg:#EEF2F6;
@@ -159,7 +160,7 @@
 </head>
 <body>
 <div id="app"></div>
-<div class="version-badge">admin v2026-09-01.1</div>
+<div class="version-badge">admin v2026-09-01.3</div>
 
 <script>
 /* ============================================================
@@ -218,8 +219,9 @@ let state = {
   storeFormError: "",
   assets: [], assetMajorCategories: [],
   assetFilters: { storeId:"", majorCode:"", q:"" },
-  currentAsset: null, assetFormError: "", assetLogs: [],
+  currentAsset: null, assetFormError: "", assetLogs: [], assetAttachments: [],
   assignmentRules: [], assignmentFilters: { storeId:"", confirmStatus:"" }, assignmentFormError: "",
+  contacts: [],
   dashboardStats: null,
   caseFilters: { status:"", storeId:"", urgency:"", q:"" },
   cases: [],
@@ -278,6 +280,7 @@ function renderSidebar(){
     { key:"case-list", label:"案件列表", ico:"📋" },
     { key:"assets", label:"資產管理", ico:"🧊" },
     { key:"stores", label:"門市管理", ico:"🏬" },
+    { key:"contacts", label:"通訊錄", ico:"📇" },
     { key:"accounts", label:"帳號管理", ico:"👤" },
     { key:"vendors", label:"廠商管理", ico:"🧰" },
     { key:"assignment-rules", label:"廠商指派規則", ico:"🗂️" },
@@ -296,7 +299,7 @@ function renderSidebar(){
 }
 
 function renderTopbar(){
-  const titles = { dashboard:"Dashboard", "case-list":"案件列表", "case-detail":"案件詳情", assets:"資產管理", "asset-detail":"資產詳情", stores:"門市管理", accounts:"帳號管理", vendors:"廠商管理", "assignment-rules":"廠商指派規則" };
+  const titles = { dashboard:"Dashboard", "case-list":"案件列表", "case-detail":"案件詳情", assets:"資產管理", "asset-detail":"資產詳情", stores:"門市管理", contacts:"通訊錄", accounts:"帳號管理", vendors:"廠商管理", "assignment-rules":"廠商指派規則" };
   const showBack = state.view === "case-detail" || state.view === "asset-detail";
   return `
   <div class="topbar">
@@ -312,6 +315,7 @@ function renderViewBody(){
   if(state.view === "assets") return renderAssets();
   if(state.view === "asset-detail") return renderAssetDetail();
   if(state.view === "stores") return renderStores();
+  if(state.view === "contacts") return renderContacts();
   if(state.view === "accounts") return renderAccounts();
   if(state.view === "vendors") return renderVendors();
   if(state.view === "assignment-rules") return renderAssignmentRules();
@@ -602,7 +606,10 @@ function renderStores(){
         ${state.stores.length===0 ? `<tr><td colspan="5" style="text-align:center; color:var(--ink-soft); padding:30px;">尚無門市資料</td></tr>` : state.stores.map(s=>`
           <tr data-store-row="${s.id}">
             <td class="mono">${s.code||''}</td>
-            <td>${s.name}${s.is_central_unit?' <span class="status-pill">中央廚房</span>':''}</td>
+            <td>
+              <input type="text" data-field="name" value="${s.name||''}" style="min-width:140px;">
+              ${s.is_central_unit?' <span class="status-pill">中央廚房</span>':''}
+            </td>
             <td>
               <select data-field="region_id" data-id="${s.id}">
                 <option value="">— 未指定 —</option>
@@ -617,6 +624,40 @@ function renderStores(){
             </td>
             <td><button class="btn btn-primary btn-sm" data-action="save-store" data-id="${s.id}">儲存</button></td>
           </tr>`).join("")}
+      </tbody>
+    </table>
+  </div>`;
+}
+
+/* ---------------- 通訊錄 ---------------- */
+function renderContacts(){
+  const byStore = {};
+  state.contacts.forEach(c=>{ byStore[c.store_id] = c; });
+  const rows = state.stores.filter(s=>s.status==='active').sort((a,b)=>(a.code||'').localeCompare(b.code||''));
+
+  return `
+  <div class="filter-bar">
+    <button class="btn btn-outline btn-sm" data-action="export-contacts">📤 匯出成 Excel（給廠商）</button>
+  </div>
+  <div class="card" style="padding:0; overflow-x:auto;">
+    <table>
+      <thead><tr><th>代碼</th><th>門市</th><th>區域</th><th>聯絡人</th><th>手機</th><th>市話</th><th>地址</th><th></th></tr></thead>
+      <tbody>
+        ${rows.map(s=>{
+          const c = byStore[s.id] || {};
+          const region = (state.regions||[]).find(r=>r.id===s.region_id);
+          return `
+          <tr data-contact-row="${s.id}">
+            <td class="mono">${s.code||''}</td>
+            <td>${s.name}</td>
+            <td>${region ? region.name : '<span style="color:var(--ink-soft);">未指定</span>'}</td>
+            <td><input type="text" data-field="contact_name" value="${c.contact_name||''}" style="min-width:130px;"></td>
+            <td><input type="text" data-field="mobile" value="${c.mobile||''}" style="min-width:110px;"></td>
+            <td><input type="text" data-field="phone" value="${c.phone||''}" style="min-width:110px;"></td>
+            <td><input type="text" data-field="address" value="${c.address||''}" style="min-width:220px;"></td>
+            <td><button class="btn btn-primary btn-sm" data-action="save-contact" data-id="${s.id}">儲存</button></td>
+          </tr>`;
+        }).join("")}
       </tbody>
     </table>
   </div>`;
@@ -716,6 +757,18 @@ function renderAssetDetail(){
       ${state.assetFormError ? `<div class="error-msg">${state.assetFormError}</div>` : ""}
       <button class="btn btn-primary" style="margin-top:12px;" data-action="save-asset">${isNew?'新增資產':'儲存變更'}</button>
     </div>
+    ${!isNew ? `
+    <div class="card" style="grid-column:1 / -1;">
+      <div class="section-title" style="margin-top:0;">設備照片</div>
+      <div class="attach-grid">
+        ${state.assetAttachments.map(p=>`
+          <a href="${p.file_path}" target="_blank" class="attach-item" style="text-decoration:none; color:inherit;">
+            <img src="${p.file_path}" onerror="this.style.display='none'">
+            <div class="cap">${new Date(p.uploaded_at).toLocaleDateString('zh-TW')}</div>
+          </a>`).join("")}
+        <div class="attach-upload-btn" data-action="upload-asset-photo">＋ 上傳照片</div>
+      </div>
+    </div>` : ""}
   </div>`;
 }
 
@@ -856,7 +909,8 @@ async function onAction(e){
   else if(action === "open-case"){ await openCase(el.dataset.id); }
   else if(action === "save-case"){ await saveCase(); }
   else if(action === "copy-case-info"){ copyCaseInfo(); }
-  else if(action === "upload-attachment"){ triggerAttachmentUpload(el.dataset.category); }
+  else if(action === "upload-attachment"){ triggerAttachmentUpload("case", state.currentCase.id, el.dataset.category); }
+  else if(action === "upload-asset-photo"){ triggerAttachmentUpload("asset", state.currentAsset.id, "asset_photo"); }
   else if(action === "quick-add-vendor"){ await quickAddVendor(); }
   else if(action === "save-account"){ await saveAccount(el.dataset.id); }
   else if(action === "add-vendor"){ await addVendor(); }
@@ -866,6 +920,8 @@ async function onAction(e){
   else if(action === "add-rule"){ await addRule(); }
   else if(action === "save-rule"){ await saveRule(el.dataset.id); }
   else if(action === "save-store"){ await saveStore(el.dataset.id); }
+  else if(action === "save-contact"){ await saveContact(el.dataset.id); }
+  else if(action === "export-contacts"){ exportContacts(); }
   else if(action === "apply-asset-filters"){ await applyAssetFilters(); }
   else if(action === "open-asset"){ await openAsset(el.dataset.id); }
   else if(action === "new-asset"){ newAssetForm(); }
@@ -955,11 +1011,19 @@ async function openAsset(id){
   state.assetFormError = "";
   state.view = "asset-detail";
   render();
+  loadAssetAttachments(id);
+}
+
+async function loadAssetAttachments(assetId){
+  const { data } = await sb.from("attachments").select("*").eq("related_type","asset").eq("related_id", assetId).order("uploaded_at", { ascending:false });
+  state.assetAttachments = data || [];
+  if(state.view === "asset-detail") render();
 }
 
 function newAssetForm(){
   state.currentAsset = { id:null, asset_no:"", name:"", major_code:"", store_id:"", status:"in_use", source:"" };
   state.assetFormError = "";
+  state.assetAttachments = [];
   state.view = "asset-detail";
   render();
 }
@@ -1100,6 +1164,7 @@ async function goTo(view){
   else if(view === "case-list") await loadCases();
   else if(view === "assets"){ await loadAssetMajorCategories(); await loadAssets(); }
   else if(view === "stores"){ await loadRegions(); await loadStores(); }
+  else if(view === "contacts"){ await loadRegions(); await loadStores(); await loadContacts(); }
   else if(view === "accounts"){ await loadRegions(); await loadAccounts(); }
   else if(view === "vendors") await loadVendors();
   else if(view === "assignment-rules") await loadVendors();
@@ -1222,33 +1287,35 @@ attachInput.type = "file";
 attachInput.accept = "image/*,video/*,application/pdf";
 attachInput.style.display = "none";
 document.body.appendChild(attachInput);
-let attachTargetCategory = null;
+let attachTarget = null; // { relatedType, relatedId, category }
 
 attachInput.addEventListener("change", async (e)=>{
   const file = e.target.files[0];
   attachInput.value = "";
-  const category = attachTargetCategory;
-  attachTargetCategory = null;
-  if(!file || !category || !state.currentCase) return;
+  const target = attachTarget;
+  attachTarget = null;
+  if(!file || !target) return;
   try{
     const ext = (file.name.split(".").pop() || "dat").toLowerCase();
-    const path = `case-photos/${state.currentCase.id}/${Date.now()}-${Math.random().toString(36).slice(2,7)}.${ext}`;
+    const folder = target.relatedType === "asset" ? "asset-photos" : "case-photos";
+    const path = `${folder}/${target.relatedId}/${Date.now()}-${Math.random().toString(36).slice(2,7)}.${ext}`;
     const { error: upErr } = await sb.storage.from("attachments").upload(path, file);
     if(upErr) throw upErr;
     const { data: urlData } = sb.storage.from("attachments").getPublicUrl(path);
     const { error: insErr } = await sb.from("attachments").insert({
-      related_type:"case", related_id: state.currentCase.id, category,
+      related_type: target.relatedType, related_id: target.relatedId, category: target.category,
       file_path: urlData.publicUrl, uploaded_by: state.profile.id
     });
     if(insErr) throw insErr;
-    await loadCaseAttachments(state.currentCase.id);
+    if(target.relatedType === "case") await loadCaseAttachments(target.relatedId);
+    else if(target.relatedType === "asset") await loadAssetAttachments(target.relatedId);
   }catch(err){
     alert("上傳失敗：" + err.message);
   }
 });
 
-function triggerAttachmentUpload(category){
-  attachTargetCategory = category;
+function triggerAttachmentUpload(relatedType, relatedId, category){
+  attachTarget = { relatedType, relatedId, category };
   attachInput.click();
 }
 
@@ -1295,12 +1362,64 @@ async function addStore(){
 
 async function saveStore(id){
   const row = document.querySelector(`tr[data-store-row="${id}"]`);
+  const name = row.querySelector('[data-field="name"]').value.trim();
   const regionId = row.querySelector('[data-field="region_id"]').value || null;
   const status = row.querySelector('[data-field="status"]').value;
-  const { error } = await sb.from("stores").update({ region_id: regionId, status }).eq("id", id);
+  if(!name){ alert("門市名稱不能空白"); return; }
+  const { error } = await sb.from("stores").update({ name, region_id: regionId, status }).eq("id", id);
   if(error){ alert("儲存失敗：" + error.message); return; }
   await loadStores();
   render();
+}
+
+/* ============================================================
+   通訊錄
+   ============================================================ */
+async function loadContacts(){
+  const { data, error } = await sb.from("store_contacts").select("*");
+  if(error){ alert("載入失敗：" + error.message); return; }
+  state.contacts = data || [];
+}
+
+async function saveContact(storeId){
+  const row = document.querySelector(`tr[data-contact-row="${storeId}"]`);
+  const payload = {
+    store_id: storeId,
+    contact_name: row.querySelector('[data-field="contact_name"]').value || null,
+    mobile: row.querySelector('[data-field="mobile"]').value || null,
+    phone: row.querySelector('[data-field="phone"]').value || null,
+    address: row.querySelector('[data-field="address"]').value || null,
+    updated_at: new Date().toISOString()
+  };
+  const { error } = await sb.from("store_contacts").upsert(payload, { onConflict: "store_id" });
+  if(error){ alert("儲存失敗：" + error.message); return; }
+  await loadContacts();
+  render();
+}
+
+function exportContacts(){
+  if(!window.XLSX){ alert("匯出功能載入失敗，請重新整理頁面再試一次"); return; }
+  const byStore = {};
+  state.contacts.forEach(c=>{ byStore[c.store_id] = c; });
+  const rows = state.stores.filter(s=>s.status==='active').sort((a,b)=>(a.code||'').localeCompare(b.code||''));
+
+  const data = rows.map(s=>{
+    const c = byStore[s.id] || {};
+    const region = (state.regions||[]).find(r=>r.id===s.region_id);
+    return {
+      "代碼": s.code || "",
+      "門市": s.name,
+      "區域": region ? region.name : "",
+      "聯絡人": c.contact_name || "",
+      "手機": c.mobile || "",
+      "市話": c.phone || "",
+      "地址": c.address || ""
+    };
+  });
+  const ws = XLSX.utils.json_to_sheet(data);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "通訊錄");
+  XLSX.writeFile(wb, `門市通訊錄_${new Date().toISOString().slice(0,10)}.xlsx`);
 }
 
 /* ============================================================
