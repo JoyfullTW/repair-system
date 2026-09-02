@@ -161,7 +161,7 @@
 </head>
 <body>
 <div id="app"></div>
-<div class="version-badge">admin v2026-09-02.4</div>
+<div class="version-badge">admin v2026-09-02.5</div>
 
 <script>
 /* ============================================================
@@ -222,7 +222,7 @@ let state = {
   assetFilters: { storeId:"", majorCode:"", q:"", noPhotoOnly:false }, assetPhotoCounts: {},
   currentAsset: null, assetFormError: "", assetLogs: [], assetAttachments: [],
   assignmentRules: [], assignmentFilters: { storeId:"", confirmStatus:"" }, assignmentFormError: "",
-  contacts: [], editingStoreId: null, editingContactId: null, generalCategories: [],
+  contacts: [], editingStoreId: null, editingContactId: null, generalCategories: [], editingVendorId: null, vendorFilterQ: "",
   dashboardStats: null,
   caseFilters: { status:"", storeId:"", urgency:"", q:"" },
   cases: [],
@@ -874,18 +874,52 @@ function renderVendors(){
   </div>
 
   <div class="section-title">廠商清單</div>
+  <div class="filter-bar">
+    <input type="text" id="vendor-filter-q" placeholder="搜尋廠商名稱…" value="${state.vendorFilterQ||''}">
+    <button class="btn btn-outline btn-sm" data-action="apply-vendor-filter">套用篩選</button>
+  </div>
   <div class="card" style="padding:0; overflow-x:auto;">
     <table>
-      <thead><tr><th>名稱</th><th>類型</th><th>聯絡人</th><th>電話</th><th>服務區域</th></tr></thead>
+      <thead><tr><th>名稱</th><th>類型</th><th>聯絡人</th><th>電話</th><th>LINE/其他</th><th>服務區域</th><th style="width:140px;"></th></tr></thead>
       <tbody>
-        ${state.vendors.length===0 ? `<tr><td colspan="5" style="text-align:center; color:var(--ink-soft); padding:30px;">尚無廠商資料</td></tr>` : state.vendors.map(v=>`
-          <tr>
-            <td>${v.name}</td>
-            <td>${v.vendor_type==='formal'?'正式':'臨時'}</td>
-            <td>${v.contact_person||'—'}</td>
-            <td>${v.phone||'—'}</td>
-            <td>${v.service_area||'—'}</td>
-          </tr>`).join("")}
+        ${(()=>{
+          const q = (state.vendorFilterQ||'').trim();
+          const list = q ? state.vendors.filter(v=> (v.name||'').includes(q)) : state.vendors;
+          if(list.length===0) return `<tr><td colspan="7" style="text-align:center; color:var(--ink-soft); padding:30px;">尚無符合的廠商資料</td></tr>`;
+          return list.map(v=>{
+            const editing = state.editingVendorId === v.id;
+            if(!editing){
+              return `
+              <tr data-vendor-row="${v.id}">
+                <td>${v.name}</td>
+                <td>${v.vendor_type==='formal'?'正式':'臨時'}</td>
+                <td>${v.contact_person||'—'}</td>
+                <td>${v.phone||'—'}</td>
+                <td>${v.line_contact||'—'}</td>
+                <td>${v.service_area||'—'}</td>
+                <td><button class="btn btn-outline btn-sm" data-action="edit-vendor-row" data-id="${v.id}">✎ 編輯</button></td>
+              </tr>`;
+            }
+            return `
+            <tr data-vendor-row="${v.id}" style="background:rgba(44,110,142,.05);">
+              <td><input type="text" data-field="name" value="${v.name||''}" style="min-width:160px;"></td>
+              <td>
+                <select data-field="vendor_type">
+                  <option value="formal" ${v.vendor_type==='formal'?'selected':''}>正式</option>
+                  <option value="temporary" ${v.vendor_type==='temporary'?'selected':''}>臨時</option>
+                </select>
+              </td>
+              <td><input type="text" data-field="contact_person" value="${v.contact_person||''}" style="min-width:100px;"></td>
+              <td><input type="text" data-field="phone" value="${v.phone||''}" style="min-width:110px;"></td>
+              <td><input type="text" data-field="line_contact" value="${v.line_contact||''}" style="min-width:110px;"></td>
+              <td><input type="text" data-field="service_area" value="${v.service_area||''}" style="min-width:110px;"></td>
+              <td style="white-space:nowrap;">
+                <button class="btn btn-primary btn-sm" data-action="save-vendor-row" data-id="${v.id}">儲存</button>
+                <button class="btn btn-outline btn-sm" data-action="cancel-edit-vendor">取消</button>
+              </td>
+            </tr>`;
+          }).join("");
+        })()}
       </tbody>
     </table>
   </div>`;
@@ -1003,6 +1037,10 @@ async function onAction(e){
   else if(action === "quick-add-vendor"){ await quickAddVendor(); }
   else if(action === "save-account"){ await saveAccount(el.dataset.id); }
   else if(action === "add-vendor"){ await addVendor(); }
+  else if(action === "edit-vendor-row"){ state.editingVendorId = el.dataset.id; render(); }
+  else if(action === "cancel-edit-vendor"){ state.editingVendorId = null; render(); }
+  else if(action === "save-vendor-row"){ await saveVendorRow(el.dataset.id); }
+  else if(action === "apply-vendor-filter"){ state.vendorFilterQ = document.getElementById("vendor-filter-q")?.value || ""; render(); }
   else if(action === "add-region"){ await addRegion(); }
   else if(action === "add-store"){ await addStore(); }
   else if(action === "apply-rule-filters"){ await applyRuleFilters(); }
@@ -1478,6 +1516,7 @@ async function goTo(view){
   state.view = view;
   state.editingStoreId = null;
   state.editingContactId = null;
+  state.editingVendorId = null;
   if(view === "dashboard") await loadDashboard();
   else if(view === "case-list") await loadCases();
   else if(view === "assets"){ await loadAssetMajorCategories(); await loadAssetMinorCategories(); await loadAssets(); }
@@ -1745,6 +1784,25 @@ function exportContacts(){
 /* ============================================================
    廠商管理
    ============================================================ */
+async function saveVendorRow(id){
+  const row = document.querySelector(`tr[data-vendor-row="${id}"]`);
+  const name = row.querySelector('[data-field="name"]').value.trim();
+  if(!name){ alert("廠商名稱不能空白"); return; }
+  const payload = {
+    name,
+    vendor_type: row.querySelector('[data-field="vendor_type"]').value,
+    contact_person: row.querySelector('[data-field="contact_person"]').value || null,
+    phone: row.querySelector('[data-field="phone"]').value || null,
+    line_contact: row.querySelector('[data-field="line_contact"]').value || null,
+    service_area: row.querySelector('[data-field="service_area"]').value || null,
+  };
+  const { error } = await sb.from("vendors").update(payload).eq("id", id);
+  if(error){ alert("儲存失敗：" + error.message); return; }
+  state.editingVendorId = null;
+  await loadVendors();
+  render();
+}
+
 async function addVendor(){
   const name = document.getElementById("vendor-name").value.trim();
   if(!name){ state.vendorFormError = "請輸入廠商名稱"; render(); return; }
