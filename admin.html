@@ -122,7 +122,8 @@
   .status-pill[data-urgency="normal"]{ background:#E6ECF1; color:var(--normal); }
   .repeat-badge{ font-size:11px; font-weight:700; color:var(--urgent); background:#FBE7E5; padding:3px 8px; border-radius:6px; }
 
-  .filter-bar{ display:flex; gap:10px; flex-wrap:wrap; margin-bottom:16px; }
+  .filter-bar{ display:flex; gap:10px; flex-wrap:wrap; margin-bottom:16px; align-items:center; }
+  .filter-bar select, .filter-bar input{ width:auto; flex:0 1 auto; min-width:150px; }
   .filter-bar select, .filter-bar input{ width:auto; min-width:140px; }
 
   .section-title{ font-size:13px; font-weight:700; color:var(--ink-soft); text-transform:uppercase; letter-spacing:.05em; margin:26px 0 10px; }
@@ -160,7 +161,7 @@
 </head>
 <body>
 <div id="app"></div>
-<div class="version-badge">admin v2026-09-01.5</div>
+<div class="version-badge">admin v2026-09-02.1</div>
 
 <script>
 /* ============================================================
@@ -599,18 +600,18 @@ function renderStores(){
       <div class="checkbox-row"><input type="checkbox" id="new-store-central"><label for="new-store-central">中央廚房／非門市單位</label></div>
       <button class="btn btn-primary" style="margin-top:10px;" data-action="add-store">新增門市</button>
     </div>
-    <div class="card">
+    <div class="card" style="grid-column:1 / -1;">
       <div class="section-title" style="margin-top:0;">一般報修類別</div>
       <p style="font-size:12px; color:var(--ink-soft); margin:0 0 10px;">門市報修「一般報修（無資產）」時可以選的類別，例如水電、門鎖、招牌。</p>
       <div style="display:flex; flex-wrap:wrap; gap:8px; margin-bottom:12px;">
         ${(state.generalCategories||[]).map(c=>`
-          <span class="status-pill" style="display:inline-flex; align-items:center; gap:6px;">
+          <span class="status-pill" style="display:inline-flex; align-items:center; gap:6px; background:var(--chip-bg);">
             ${c.name}
-            <span data-action="delete-general-category" data-id="${c.id}" style="cursor:pointer; opacity:.6;">✕</span>
+            <span data-action="delete-general-category" data-id="${c.id}" style="cursor:pointer; opacity:.6; font-weight:700;">✕</span>
           </span>`).join("") || `<p style="font-size:12px; color:var(--ink-soft);">尚無類別資料</p>`}
       </div>
-      <div style="display:flex; gap:8px;">
-        <input type="text" id="new-general-category" placeholder="新類別名稱，例如：消防">
+      <div style="display:flex; gap:8px; max-width:420px;">
+        <input type="text" id="new-general-category" placeholder="新類別名稱，例如：消防" style="flex:1;">
         <button class="btn btn-primary btn-sm" data-action="add-general-category">新增</button>
       </div>
     </div>
@@ -630,7 +631,7 @@ function renderStores(){
               <td class="mono">${s.code||''}</td>
               <td>${s.name||''}${s.is_central_unit?' <span class="status-pill">中央廚房</span>':''}</td>
               <td>${region ? region.name : '<span style="color:var(--ink-soft);">未指定</span>'}</td>
-              <td>${s.status==='active' ? '<span class="status-pill" style="background:var(--ok);">營業中</span>' : '<span class="status-pill" style="background:var(--ink-soft);">已歇業</span>'}</td>
+              <td>${s.status==='active' ? '<span class="status-pill" style="background:var(--ok); color:#fff;">營業中</span>' : '<span class="status-pill" style="background:var(--ink-soft); color:#fff;">已歇業</span>'}</td>
               <td><button class="btn btn-outline btn-sm" data-action="edit-store" data-id="${s.id}">✎ 編輯</button></td>
             </tr>`;
           }
