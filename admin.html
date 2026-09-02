@@ -161,7 +161,7 @@
 </head>
 <body>
 <div id="app"></div>
-<div class="version-badge">admin v2026-09-02.1</div>
+<div class="version-badge">admin v2026-09-02.3</div>
 
 <script>
 /* ============================================================
@@ -733,8 +733,10 @@ function renderAssets(){
     <select id="asset-filter-store"><option value="">全部門市</option>${storeOptions}</select>
     <select id="asset-filter-major"><option value="">全部大類</option>${majorOptions}</select>
     <button class="btn btn-outline btn-sm" data-action="apply-asset-filters">套用篩選</button>
+    <button class="btn btn-outline btn-sm" data-action="export-assets">📤 匯出目前清單</button>
     <button class="btn btn-primary btn-sm" data-action="new-asset" style="margin-left:auto;">＋新增資產</button>
   </div>
+  ${f.storeId ? "" : `<p style="font-size:12px; color:var(--ink-soft); margin:-6px 0 12px;">💡 想匯出「單一門市的完整清單」，先在上面選好門市、按套用篩選，再按匯出。</p>`}
   <div class="card" style="padding:0; overflow-x:auto;">
     <table>
       <thead><tr><th>資產編號</th><th>名稱</th><th>門市</th><th>狀態</th><th>來源</th><th></th></tr></thead>
@@ -772,7 +774,11 @@ function renderAssetDetail(){
       </div>
       ${isNew ? `<p id="asset-no-hint" style="font-size:12px; color:var(--ink-soft); margin:6px 0 0;">先選好右邊「設備大類」「中類」「所在門市」，再按「建議下一號」，系統會自動查目前這個組合最大用到幾號。格式：大類代碼＋門市3碼-購入年度末2碼-中類3碼-流水號4碼</p>` : ""}
       <label class="field-label" style="margin-top:10px;">資產名稱</label>
-      <input type="text" id="asset-name" value="${a.name||''}">
+      <div style="display:flex; gap:8px;">
+        <input type="text" id="asset-name" value="${a.name||''}" style="flex:1;">
+        <button type="button" class="btn btn-outline btn-sm" data-action="suggest-asset-category" style="white-space:nowrap;">🔍 建議分類</button>
+      </div>
+      <p id="asset-category-hint" style="font-size:12px; color:var(--ink-soft); margin:6px 0 0;"></p>
       <div class="grid grid-2">
         <div><label class="field-label">設備大類</label>
           <select id="asset-major"><option value="">—</option>${majorOptions}</select>
@@ -1005,6 +1011,8 @@ async function onAction(e){
   else if(action === "new-asset"){ newAssetForm(); }
   else if(action === "save-asset"){ await saveAsset(); }
   else if(action === "suggest-asset-no"){ await suggestAssetNo(); }
+  else if(action === "suggest-asset-category"){ suggestAssetCategory(); }
+  else if(action === "export-assets"){ await exportAssets(); }
   else if(action === "reset-password"){ await resetPassword(el.dataset.id, el.dataset.name); }
   else if(action === "add-general-category"){ await addGeneralCategory(); }
   else if(action === "delete-general-category"){ await deleteGeneralCategory(el.dataset.id); }
@@ -1113,6 +1121,126 @@ function newAssetForm(){
   state.assetAttachments = [];
   state.view = "asset-detail";
   render();
+}
+
+// 依資產名稱關鍵字建議「設備大類＋中類」，只是關鍵字比對，不是真正AI辨識，僅供參考
+const CATEGORY_KEYWORD_MAP = [
+  // [關鍵字陣列, 大類代碼, 中類代碼]
+  [["冰箱","冷凍庫","冷凍櫃","冷藏庫","冷藏櫃"], "C", "004"],
+  [["工作台冰箱"], "C", "005"],
+  [["洗碗機"], "C", "003"],
+  [["電飯鍋","飯鍋","保溫鍋","湯鍋","保溫飯鍋"], "C", "001"],
+  [["咖啡機","冰沙機","茶飲機","飲水機","爆米花機","霜淇淋機","可樂機","茶包台","冰塊槽","製冰機"], "C", "001"],
+  [["味噌","油鍋","煎台","煎板","微波爐","煮飯鍋","烤箱","六口爐","四口爐","瓦斯爐","電磁爐","煮麵機","切絲機","磅秤","水槽","油炸機","抽風機","排煙"], "C", "002"],
+  [["POS","出單機","刷卡機","點鈔機","標籤機","LinePay","LINE PAY","服務鈴","公播","叫號","取號","金庫"], "G", "001"],
+  [["座椅","沙發","桌","椅"], "G", "002"],
+  [["滅火器","消防警報","警報發信器"], "G", "004"],
+  [["招牌","看板"], "G", "005"],
+  [["監視","監視系統","監視器"], "G", "006"],
+  [["電腦主機","主機"], "F", "001"],
+  [["螢幕"], "F", "002"],
+  [["筆電","筆記型電腦","平板"], "F", "003"],
+  [["印表機"], "F", "005"],
+  [["掃瞄器","掃描器"], "F", "006"],
+  [["硬碟"], "F", "007"],
+  [["電話機","電話","子母機"], "F", "008"],
+  [["WIFI","Wi-Fi","無線分享器","分享器","數據機","路由器"], "F", "009"],
+  [["碎紙機"], "F", "010"],
+  [["護貝機"], "F", "011"],
+  [["變壓器","電閘","電箱","總開關","接電盤","充電區"], "A", "001"],
+  [["濾心","熱水器","排煙口","排水","水管"], "A", "002"],
+  [["消防設備工事"], "A", "006"],
+  [["照明","燈"], "A", "007"],
+  [["招牌工程","標示"], "A", "008"],
+  [["裝修"], "A", "004"],
+];
+
+async function exportAssets(){
+  if(!window.XLSX){ alert("匯出功能載入失敗，請重新整理頁面再試一次"); return; }
+  if(state.assets.length === 0){ alert("目前沒有資料可以匯出"); return; }
+
+  const assetIds = state.assets.map(a=>a.id);
+  const { data: photos, error } = await sb.from("attachments")
+    .select("related_id, file_path")
+    .eq("related_type", "asset")
+    .in("related_id", assetIds)
+    .order("uploaded_at", { ascending: true });
+  if(error){ alert("查詢照片失敗：" + error.message); return; }
+
+  const photosByAsset = {};
+  (photos||[]).forEach(p=>{
+    if(!photosByAsset[p.related_id]) photosByAsset[p.related_id] = [];
+    photosByAsset[p.related_id].push(p.file_path);
+  });
+
+  const maxPhotos = Math.min(5, Math.max(1, ...Object.values(photosByAsset).map(arr=>arr.length), 1));
+
+  const rows = state.assets.map(a=>{
+    const minorCat = state.assetMinorCategories.find(m=> m.id === a.minor_category_id);
+    const row = {
+      "資產編號": a.asset_no || "",
+      "資產名稱": a.name || "",
+      "門市": a.store_name || "",
+      "設備大類": a.major_code || "",
+      "中類": minorCat ? `${minorCat.code} ${minorCat.name}` : "",
+      "品牌": a.brand || "",
+      "型號": a.model || "",
+      "序號": a.serial_no || "",
+      "來源": a.source==='used' ? '二手' : (a.source==='new' ? '新購' : ''),
+      "狀態": ASSET_STATUS_LABEL[a.status] || a.status || "",
+      "購入廠商": a.supplier || "",
+      "購買日期": a.purchase_date || "",
+      "購買價格": a.purchase_price || "",
+      "耐用年限(年)": a.useful_life_years || "",
+      "保固期限": a.warranty_until || "",
+      "備註": a.notes || "",
+    };
+    const urls = photosByAsset[a.id] || [];
+    for(let i=0; i<maxPhotos; i++){
+      row[`照片連結${i+1}`] = urls[i] || "";
+    }
+    return row;
+  });
+
+  const ws = XLSX.utils.json_to_sheet(rows);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "資產清單");
+  const storeLabel = state.assetFilters.storeId
+    ? (state.stores.find(s=>s.id===state.assetFilters.storeId)?.name || "門市")
+    : "全部門市";
+  XLSX.writeFile(wb, `資產清單_${storeLabel}_${new Date().toISOString().slice(0,10)}.xlsx`);
+}
+
+function suggestAssetCategory(){
+  const nameInput = document.getElementById("asset-name");
+  const name = (nameInput.value || "").trim();
+  const hint = document.getElementById("asset-category-hint");
+  if(!name){ alert("請先輸入資產名稱"); return; }
+
+  let match = null;
+  for(const [keywords, major, minor] of CATEGORY_KEYWORD_MAP){
+    if(keywords.some(kw=> name.includes(kw))){ match = { major, minor }; break; }
+  }
+
+  if(!match){
+    hint.textContent = "沒有比對到符合的關鍵字，請自己手動選擇設備大類與中類。";
+    hint.style.color = "var(--warn)";
+    return;
+  }
+
+  const majorSel = document.getElementById("asset-major");
+  majorSel.value = match.major;
+  majorSel.dispatchEvent(new Event("change"));
+
+  const minorCat = state.assetMinorCategories.find(m=> m.major_code===match.major && m.code===match.minor);
+  setTimeout(()=>{
+    const minorSel = document.getElementById("asset-minor-code");
+    if(minorSel) minorSel.value = match.minor;
+  }, 0);
+
+  const majorCat = state.assetMajorCategories.find(m=>m.code===match.major);
+  hint.textContent = `依關鍵字比對，建議分類為「${match.major} ${majorCat?majorCat.name:''}」→「${match.minor} ${minorCat?minorCat.name:''}」，僅供參考，請確認是否正確。`;
+  hint.style.color = "var(--ok)";
 }
 
 async function suggestAssetNo(){
