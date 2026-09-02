@@ -161,7 +161,7 @@
 </head>
 <body>
 <div id="app"></div>
-<div class="version-badge">admin v2026-09-02.3</div>
+<div class="version-badge">admin v2026-09-02.4</div>
 
 <script>
 /* ============================================================
@@ -219,7 +219,7 @@ let state = {
   stores: [], vendors: [], regions: [],
   storeFormError: "",
   assets: [], assetMajorCategories: [], assetMinorCategories: [],
-  assetFilters: { storeId:"", majorCode:"", q:"" },
+  assetFilters: { storeId:"", majorCode:"", q:"", noPhotoOnly:false }, assetPhotoCounts: {},
   currentAsset: null, assetFormError: "", assetLogs: [], assetAttachments: [],
   assignmentRules: [], assignmentFilters: { storeId:"", confirmStatus:"" }, assignmentFormError: "",
   contacts: [], editingStoreId: null, editingContactId: null, generalCategories: [],
@@ -732,6 +732,9 @@ function renderAssets(){
     <input type="text" id="asset-filter-q" placeholder="搜尋資產編號或名稱…" value="${f.q}">
     <select id="asset-filter-store"><option value="">全部門市</option>${storeOptions}</select>
     <select id="asset-filter-major"><option value="">全部大類</option>${majorOptions}</select>
+    <label style="display:flex; align-items:center; gap:6px; font-size:13px; white-space:nowrap;">
+      <input type="checkbox" id="asset-filter-nophoto" ${f.noPhotoOnly?'checked':''} style="width:auto;"> 只顯示沒有照片的
+    </label>
     <button class="btn btn-outline btn-sm" data-action="apply-asset-filters">套用篩選</button>
     <button class="btn btn-outline btn-sm" data-action="export-assets">📤 匯出目前清單</button>
     <button class="btn btn-primary btn-sm" data-action="new-asset" style="margin-left:auto;">＋新增資產</button>
@@ -739,17 +742,23 @@ function renderAssets(){
   ${f.storeId ? "" : `<p style="font-size:12px; color:var(--ink-soft); margin:-6px 0 12px;">💡 想匯出「單一門市的完整清單」，先在上面選好門市、按套用篩選，再按匯出。</p>`}
   <div class="card" style="padding:0; overflow-x:auto;">
     <table>
-      <thead><tr><th>資產編號</th><th>名稱</th><th>門市</th><th>狀態</th><th>來源</th><th></th></tr></thead>
+      <thead><tr><th>資產編號</th><th>名稱</th><th>門市</th><th>狀態</th><th>來源</th><th>照片</th><th></th></tr></thead>
       <tbody>
-        ${state.assets.length===0 ? `<tr><td colspan="6" style="text-align:center; color:var(--ink-soft); padding:30px;">目前沒有符合條件的資產</td></tr>` : state.assets.map(a=>`
+        ${(()=>{ const list = f.noPhotoOnly ? state.assets.filter(a=> !(state.assetPhotoCounts[a.id]>0)) : state.assets;
+          if(list.length===0) return `<tr><td colspan="7" style="text-align:center; color:var(--ink-soft); padding:30px;">目前沒有符合條件的資產</td></tr>`;
+          return list.map(a=>{
+            const photoCount = state.assetPhotoCounts[a.id] || 0;
+            return `
           <tr class="row-clickable" data-action="open-asset" data-id="${a.id}">
             <td class="case-no">${a.asset_no}</td>
             <td>${a.name}</td>
             <td>${a.store_name||''}</td>
             <td><span class="status-pill">${ASSET_STATUS_LABEL[a.status]||a.status}</span></td>
             <td style="font-size:12px; color:var(--ink-soft);">${a.source==='used'?'二手':(a.source==='new'?'新購':'—')}</td>
+            <td>${photoCount>0 ? `<span style="font-size:12px; color:var(--ok);">📷 ${photoCount}</span>` : `<span style="font-size:12px; color:var(--warn);">尚無照片</span>`}</td>
             <td>›</td>
-          </tr>`).join("")}
+          </tr>`;
+          }).join(""); })()}
       </tbody>
     </table>
   </div>`;
@@ -1089,12 +1098,22 @@ async function loadAssets(){
   const { data, error } = await q;
   if(error){ alert("載入失敗：" + error.message); return; }
   state.assets = (data||[]).map(a=>({ ...a, store_name: a.stores?.name || "" }));
+
+  state.assetPhotoCounts = {};
+  const ids = state.assets.map(a=>a.id);
+  if(ids.length){
+    const { data: photoRows } = await sb.from("attachments").select("related_id").eq("related_type","asset").in("related_id", ids);
+    (photoRows||[]).forEach(p=>{
+      state.assetPhotoCounts[p.related_id] = (state.assetPhotoCounts[p.related_id]||0) + 1;
+    });
+  }
 }
 
 async function applyAssetFilters(){
   state.assetFilters.storeId = document.getElementById("asset-filter-store")?.value || "";
   state.assetFilters.majorCode = document.getElementById("asset-filter-major")?.value || "";
   state.assetFilters.q = document.getElementById("asset-filter-q")?.value || "";
+  state.assetFilters.noPhotoOnly = document.getElementById("asset-filter-nophoto")?.checked || false;
   await loadAssets();
   render();
 }
@@ -1157,9 +1176,11 @@ const CATEGORY_KEYWORD_MAP = [
 
 async function exportAssets(){
   if(!window.XLSX){ alert("匯出功能載入失敗，請重新整理頁面再試一次"); return; }
-  if(state.assets.length === 0){ alert("目前沒有資料可以匯出"); return; }
+  const f = state.assetFilters;
+  const list = f.noPhotoOnly ? state.assets.filter(a=> !(state.assetPhotoCounts[a.id]>0)) : state.assets;
+  if(list.length === 0){ alert("目前沒有資料可以匯出"); return; }
 
-  const assetIds = state.assets.map(a=>a.id);
+  const assetIds = list.map(a=>a.id);
   const { data: photos, error } = await sb.from("attachments")
     .select("related_id, file_path")
     .eq("related_type", "asset")
@@ -1175,7 +1196,7 @@ async function exportAssets(){
 
   const maxPhotos = Math.min(5, Math.max(1, ...Object.values(photosByAsset).map(arr=>arr.length), 1));
 
-  const rows = state.assets.map(a=>{
+  const rows = list.map(a=>{
     const minorCat = state.assetMinorCategories.find(m=> m.id === a.minor_category_id);
     const row = {
       "資產編號": a.asset_no || "",
@@ -1208,7 +1229,8 @@ async function exportAssets(){
   const storeLabel = state.assetFilters.storeId
     ? (state.stores.find(s=>s.id===state.assetFilters.storeId)?.name || "門市")
     : "全部門市";
-  XLSX.writeFile(wb, `資產清單_${storeLabel}_${new Date().toISOString().slice(0,10)}.xlsx`);
+  const suffix = f.noPhotoOnly ? "_缺照片清單" : "";
+  XLSX.writeFile(wb, `資產清單_${storeLabel}${suffix}_${new Date().toISOString().slice(0,10)}.xlsx`);
 }
 
 function suggestAssetCategory(){
