@@ -203,7 +203,7 @@
     載入中…如果這段文字一直沒有消失，代表網頁程式無法執行，請截圖回報。
   </div>
 </div>
-<div class="version-badge">store v2026-09-01.1</div>
+<div class="version-badge">store v2026-09-01.2</div>
 
 <script>
 /* ============================================================
@@ -1013,7 +1013,7 @@ function onAssetSearch(e){
     if(error){ box.innerHTML = "搜尋失敗：" + error.message; return; }
     if(!data || data.length===0){ box.innerHTML = "找不到符合的資產"; return; }
     box.innerHTML = data.map(a=>`
-      <div class="card" style="padding:12px; cursor:pointer;" data-pick-asset="${a.id}" data-label="${a.asset_no} ${a.name}">
+      <div class="card" style="padding:12px; cursor:pointer;" data-pick-asset="${a.id}" data-label="${a.asset_no} ${a.name}" data-name="${a.name}">
         <strong style="font-size:14px;">${a.name}</strong>
         <div style="font-family:monospace; font-size:12px; color:var(--ink-soft);">${a.asset_no}</div>
       </div>`).join("");
@@ -1021,6 +1021,7 @@ function onAssetSearch(e){
       el.addEventListener("click", ()=>{
         state.newReport.assetId = el.dataset.pickAsset;
         state.newReport.assetLabel = el.dataset.label;
+        state.newReport.faultCategory = el.dataset.name;
         advanceReportStep();
       });
     });

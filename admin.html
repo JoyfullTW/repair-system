@@ -160,7 +160,7 @@
 </head>
 <body>
 <div id="app"></div>
-<div class="version-badge">admin v2026-09-01.3</div>
+<div class="version-badge">admin v2026-09-01.5</div>
 
 <script>
 /* ============================================================
@@ -217,11 +217,11 @@ let state = {
   loginError: "",
   stores: [], vendors: [], regions: [],
   storeFormError: "",
-  assets: [], assetMajorCategories: [],
+  assets: [], assetMajorCategories: [], assetMinorCategories: [],
   assetFilters: { storeId:"", majorCode:"", q:"" },
   currentAsset: null, assetFormError: "", assetLogs: [], assetAttachments: [],
   assignmentRules: [], assignmentFilters: { storeId:"", confirmStatus:"" }, assignmentFormError: "",
-  contacts: [],
+  contacts: [], editingStoreId: null, editingContactId: null, generalCategories: [],
   dashboardStats: null,
   caseFilters: { status:"", storeId:"", urgency:"", q:"" },
   cases: [],
@@ -556,7 +556,10 @@ function renderAccounts(){
                 <option value="disabled" ${u.status==='disabled'?'selected':''}>停用</option>
               </select>
             </td>
-            <td><button class="btn btn-primary btn-sm" data-action="save-account" data-id="${u.id}">儲存</button></td>
+            <td style="white-space:nowrap;">
+              <button class="btn btn-primary btn-sm" data-action="save-account" data-id="${u.id}">儲存</button>
+              <button class="btn btn-outline btn-sm" data-action="reset-password" data-id="${u.id}" data-name="${u.display_name}">🔑 重設密碼</button>
+            </td>
           </tr>`).join("")}
       </tbody>
     </table>
@@ -596,15 +599,43 @@ function renderStores(){
       <div class="checkbox-row"><input type="checkbox" id="new-store-central"><label for="new-store-central">中央廚房／非門市單位</label></div>
       <button class="btn btn-primary" style="margin-top:10px;" data-action="add-store">新增門市</button>
     </div>
+    <div class="card">
+      <div class="section-title" style="margin-top:0;">一般報修類別</div>
+      <p style="font-size:12px; color:var(--ink-soft); margin:0 0 10px;">門市報修「一般報修（無資產）」時可以選的類別，例如水電、門鎖、招牌。</p>
+      <div style="display:flex; flex-wrap:wrap; gap:8px; margin-bottom:12px;">
+        ${(state.generalCategories||[]).map(c=>`
+          <span class="status-pill" style="display:inline-flex; align-items:center; gap:6px;">
+            ${c.name}
+            <span data-action="delete-general-category" data-id="${c.id}" style="cursor:pointer; opacity:.6;">✕</span>
+          </span>`).join("") || `<p style="font-size:12px; color:var(--ink-soft);">尚無類別資料</p>`}
+      </div>
+      <div style="display:flex; gap:8px;">
+        <input type="text" id="new-general-category" placeholder="新類別名稱，例如：消防">
+        <button class="btn btn-primary btn-sm" data-action="add-general-category">新增</button>
+      </div>
+    </div>
   </div>
 
   <div class="section-title">門市清單</div>
   <div class="card" style="padding:0; overflow-x:auto;">
     <table>
-      <thead><tr><th>代碼</th><th>名稱</th><th>區域</th><th>狀態</th><th></th></tr></thead>
+      <thead><tr><th>代碼</th><th>名稱</th><th>區域</th><th>狀態</th><th style="width:140px;"></th></tr></thead>
       <tbody>
-        ${state.stores.length===0 ? `<tr><td colspan="5" style="text-align:center; color:var(--ink-soft); padding:30px;">尚無門市資料</td></tr>` : state.stores.map(s=>`
-          <tr data-store-row="${s.id}">
+        ${state.stores.length===0 ? `<tr><td colspan="5" style="text-align:center; color:var(--ink-soft); padding:30px;">尚無門市資料</td></tr>` : state.stores.map(s=>{
+          const editing = state.editingStoreId === s.id;
+          const region = (state.regions||[]).find(r=>r.id===s.region_id);
+          if(!editing){
+            return `
+            <tr data-store-row="${s.id}">
+              <td class="mono">${s.code||''}</td>
+              <td>${s.name||''}${s.is_central_unit?' <span class="status-pill">中央廚房</span>':''}</td>
+              <td>${region ? region.name : '<span style="color:var(--ink-soft);">未指定</span>'}</td>
+              <td>${s.status==='active' ? '<span class="status-pill" style="background:var(--ok);">營業中</span>' : '<span class="status-pill" style="background:var(--ink-soft);">已歇業</span>'}</td>
+              <td><button class="btn btn-outline btn-sm" data-action="edit-store" data-id="${s.id}">✎ 編輯</button></td>
+            </tr>`;
+          }
+          return `
+          <tr data-store-row="${s.id}" style="background:rgba(44,110,142,.05);">
             <td class="mono">${s.code||''}</td>
             <td>
               <input type="text" data-field="name" value="${s.name||''}" style="min-width:140px;">
@@ -622,8 +653,12 @@ function renderStores(){
                 <option value="closed" ${s.status==='closed'?'selected':''}>已歇業</option>
               </select>
             </td>
-            <td><button class="btn btn-primary btn-sm" data-action="save-store" data-id="${s.id}">儲存</button></td>
-          </tr>`).join("")}
+            <td style="white-space:nowrap;">
+              <button class="btn btn-primary btn-sm" data-action="save-store" data-id="${s.id}">儲存</button>
+              <button class="btn btn-outline btn-sm" data-action="cancel-edit-store">取消</button>
+            </td>
+          </tr>`;
+        }).join("")}
       </tbody>
     </table>
   </div>`;
@@ -646,8 +681,22 @@ function renderContacts(){
         ${rows.map(s=>{
           const c = byStore[s.id] || {};
           const region = (state.regions||[]).find(r=>r.id===s.region_id);
+          const editing = state.editingContactId === s.id;
+          if(!editing){
+            return `
+            <tr data-contact-row="${s.id}">
+              <td class="mono">${s.code||''}</td>
+              <td>${s.name}</td>
+              <td>${region ? region.name : '<span style="color:var(--ink-soft);">未指定</span>'}</td>
+              <td>${c.contact_name||'<span style="color:var(--ink-soft);">—</span>'}</td>
+              <td>${c.mobile||'<span style="color:var(--ink-soft);">—</span>'}</td>
+              <td>${c.phone||'<span style="color:var(--ink-soft);">—</span>'}</td>
+              <td>${c.address||'<span style="color:var(--ink-soft);">—</span>'}</td>
+              <td><button class="btn btn-outline btn-sm" data-action="edit-contact" data-id="${s.id}">✎ 編輯</button></td>
+            </tr>`;
+          }
           return `
-          <tr data-contact-row="${s.id}">
+          <tr data-contact-row="${s.id}" style="background:rgba(44,110,142,.05);">
             <td class="mono">${s.code||''}</td>
             <td>${s.name}</td>
             <td>${region ? region.name : '<span style="color:var(--ink-soft);">未指定</span>'}</td>
@@ -655,7 +704,10 @@ function renderContacts(){
             <td><input type="text" data-field="mobile" value="${c.mobile||''}" style="min-width:110px;"></td>
             <td><input type="text" data-field="phone" value="${c.phone||''}" style="min-width:110px;"></td>
             <td><input type="text" data-field="address" value="${c.address||''}" style="min-width:220px;"></td>
-            <td><button class="btn btn-primary btn-sm" data-action="save-contact" data-id="${s.id}">儲存</button></td>
+            <td style="white-space:nowrap;">
+              <button class="btn btn-primary btn-sm" data-action="save-contact" data-id="${s.id}">儲存</button>
+              <button class="btn btn-outline btn-sm" data-action="cancel-edit-contact">取消</button>
+            </td>
           </tr>`;
         }).join("")}
       </tbody>
@@ -705,21 +757,30 @@ function renderAssetDetail(){
   const isNew = !a.id;
   const storeOptions = state.stores.filter(s=>s.status==='active').map(s=>`<option value="${s.id}" ${a.store_id===s.id?'selected':''}>${s.code?('['+s.code+'] '):''}${s.name}</option>`).join("");
   const majorOptions = state.assetMajorCategories.map(m=>`<option value="${m.code}" ${a.major_code===m.code?'selected':''}>${m.code} ${m.name}</option>`).join("");
+  const minorForMajor = state.assetMinorCategories.filter(m=> m.major_code === a.major_code);
+  const minorOptions = minorForMajor.map(m=>`<option value="${m.code}" ${a.minor_code_display===m.code?'selected':''}>${m.code} ${m.name}</option>`).join("");
 
   return `
   <div class="grid grid-2" style="align-items:start;">
     <div class="card">
       <div class="section-title" style="margin-top:0;">${isNew?'新增資產':'基本資料'}</div>
-      <label class="field-label">資產編號${isNew?'（依規則自訂，例：C002-17-001-0001）':''}</label>
-      <input type="text" id="asset-no" value="${a.asset_no||''}" ${isNew?'':'readonly'}>
-      <label class="field-label">資產名稱</label>
+      <label class="field-label">資產編號</label>
+      <div style="display:flex; gap:8px;">
+        <input type="text" id="asset-no" value="${a.asset_no||''}" ${isNew?'':'readonly'} style="flex:1;">
+        ${isNew ? `<button type="button" class="btn btn-outline btn-sm" data-action="suggest-asset-no" style="white-space:nowrap;">🔢 建議下一號</button>` : ""}
+      </div>
+      ${isNew ? `<p id="asset-no-hint" style="font-size:12px; color:var(--ink-soft); margin:6px 0 0;">先選好右邊「設備大類」「中類」「所在門市」，再按「建議下一號」，系統會自動查目前這個組合最大用到幾號。格式：大類代碼＋門市3碼-購入年度末2碼-中類3碼-流水號4碼</p>` : ""}
+      <label class="field-label" style="margin-top:10px;">資產名稱</label>
       <input type="text" id="asset-name" value="${a.name||''}">
       <div class="grid grid-2">
         <div><label class="field-label">設備大類</label>
           <select id="asset-major"><option value="">—</option>${majorOptions}</select>
         </div>
-        <div><label class="field-label">中類代碼（選填）</label>
-          <input type="text" id="asset-minor-code" value="${a.minor_code_display||''}" placeholder="例如：001">
+        <div><label class="field-label">中類</label>
+          <select id="asset-minor-code">
+            <option value="">— 請先選設備大類 —</option>
+            ${minorOptions}
+          </select>
         </div>
       </div>
       <div class="grid grid-2">
@@ -730,11 +791,12 @@ function renderAssetDetail(){
       <input type="text" id="asset-serial" value="${a.serial_no||''}">
       <label class="field-label">來源</label>
       <select id="asset-source">
-        <option value="">—</option>
+        <option value="">— 請選擇 —</option>
         <option value="new" ${a.source==='new'?'selected':''}>新購</option>
         <option value="used" ${a.source==='used'?'selected':''}>二手</option>
       </select>
-      <label class="field-label">所在門市</label>
+      <p style="font-size:12px; color:var(--ink-soft); margin:4px 0 0;">這台設備是總務新買的選「新購」；如果是別的門市／單位調撥過來的舊設備選「二手」。</p>
+      <label class="field-label" style="margin-top:10px;">所在門市</label>
       <select id="asset-store"><option value="">— 未指定 —</option>${storeOptions}</select>
       <label class="field-label">設備狀態</label>
       <select id="asset-status">
@@ -748,10 +810,12 @@ function renderAssetDetail(){
         <div><label class="field-label">購買日期</label><input type="date" id="asset-purchase-date" value="${a.purchase_date||''}"></div>
         <div><label class="field-label">購買價格</label><input type="number" id="asset-purchase-price" value="${a.purchase_price||''}"></div>
       </div>
-      <label class="field-label">供應商</label>
+      <label class="field-label">購入廠商</label>
       <input type="text" id="asset-supplier" value="${a.supplier||''}">
-      <label class="field-label">保固期限</label>
-      <input type="date" id="asset-warranty" value="${a.warranty_until||''}">
+      <div class="grid grid-2">
+        <div><label class="field-label">耐用年限（年）</label><input type="number" id="asset-useful-life" value="${a.useful_life_years||''}"></div>
+        <div><label class="field-label">保固期限</label><input type="date" id="asset-warranty" value="${a.warranty_until||''}"></div>
+      </div>
       <label class="field-label">備註</label>
       <textarea id="asset-notes">${a.notes||''}</textarea>
       ${state.assetFormError ? `<div class="error-msg">${state.assetFormError}</div>` : ""}
@@ -892,6 +956,15 @@ function bindEvents(){
 
   const filterQ = document.getElementById("filter-q");
   if(filterQ) filterQ.addEventListener("keydown", (e)=>{ if(e.key==="Enter") applyCaseFilters(); });
+
+  const assetMajorSel = document.getElementById("asset-major");
+  if(assetMajorSel) assetMajorSel.addEventListener("change", ()=>{
+    const minorSel = document.getElementById("asset-minor-code");
+    if(!minorSel) return;
+    const opts = state.assetMinorCategories.filter(m=> m.major_code === assetMajorSel.value);
+    minorSel.innerHTML = `<option value="">${opts.length ? '— 請選擇 —' : '— 請先選設備大類 —'}</option>` +
+      opts.map(m=>`<option value="${m.code}">${m.code} ${m.name}</option>`).join("");
+  });
 }
 
 async function onAction(e){
@@ -920,12 +993,20 @@ async function onAction(e){
   else if(action === "add-rule"){ await addRule(); }
   else if(action === "save-rule"){ await saveRule(el.dataset.id); }
   else if(action === "save-store"){ await saveStore(el.dataset.id); }
+  else if(action === "edit-store"){ state.editingStoreId = el.dataset.id; render(); }
+  else if(action === "cancel-edit-store"){ state.editingStoreId = null; render(); }
   else if(action === "save-contact"){ await saveContact(el.dataset.id); }
+  else if(action === "edit-contact"){ state.editingContactId = el.dataset.id; render(); }
+  else if(action === "cancel-edit-contact"){ state.editingContactId = null; render(); }
   else if(action === "export-contacts"){ exportContacts(); }
   else if(action === "apply-asset-filters"){ await applyAssetFilters(); }
   else if(action === "open-asset"){ await openAsset(el.dataset.id); }
   else if(action === "new-asset"){ newAssetForm(); }
   else if(action === "save-asset"){ await saveAsset(); }
+  else if(action === "suggest-asset-no"){ await suggestAssetNo(); }
+  else if(action === "reset-password"){ await resetPassword(el.dataset.id, el.dataset.name); }
+  else if(action === "add-general-category"){ await addGeneralCategory(); }
+  else if(action === "delete-general-category"){ await deleteGeneralCategory(el.dataset.id); }
 }
 
 /* ============================================================
@@ -985,6 +1066,11 @@ async function loadAssetMajorCategories(){
   state.assetMajorCategories = data || [];
 }
 
+async function loadAssetMinorCategories(){
+  const { data } = await sb.from("asset_minor_categories").select("*").order("major_code").order("code");
+  state.assetMinorCategories = data || [];
+}
+
 async function loadAssets(){
   const f = state.assetFilters;
   let q = sb.from("assets").select("*, stores(name)").order("asset_no").limit(300);
@@ -1028,6 +1114,35 @@ function newAssetForm(){
   render();
 }
 
+async function suggestAssetNo(){
+  const major = document.getElementById("asset-major").value;
+  const minor = document.getElementById("asset-minor-code").value;
+  const storeId = document.getElementById("asset-store").value;
+  const store = state.stores.find(s=>s.id===storeId);
+  const purchaseDate = document.getElementById("asset-purchase-date").value;
+  const hint = document.getElementById("asset-no-hint");
+
+  if(!major || !minor || !store){
+    alert("請先選好「設備大類」「中類」「所在門市」，再按建議下一號");
+    return;
+  }
+  const yy = purchaseDate ? purchaseDate.slice(2,4) : String(new Date().getFullYear()).slice(2,4);
+  const prefix = `${major}${store.code}-${yy}-${minor}-`;
+  const { data, error } = await sb.from("assets").select("asset_no").ilike("asset_no", `${prefix}%`);
+  if(error){ alert("查詢失敗：" + error.message); return; }
+  let maxSeq = 0;
+  (data||[]).forEach(row=>{
+    const m = (row.asset_no||"").match(/-(\d{4})$/);
+    if(m) maxSeq = Math.max(maxSeq, parseInt(m[1],10));
+  });
+  const nextSeq = String(maxSeq+1).padStart(4,'0');
+  const suggested = `${prefix}${nextSeq}`;
+  document.getElementById("asset-no").value = suggested;
+  if(hint) hint.textContent = maxSeq
+    ? `這個組合目前最大用到 ${prefix}${String(maxSeq).padStart(4,'0')}，已自動帶入建議編號，可以手動修改。`
+    : `這個組合目前還沒有任何資產，已自動帶入第一號，可以手動修改。`;
+}
+
 async function saveAsset(){
   const a = state.currentAsset;
   const assetNo = document.getElementById("asset-no").value.trim();
@@ -1055,6 +1170,7 @@ async function saveAsset(){
     purchase_date: document.getElementById("asset-purchase-date").value || null,
     purchase_price: numOrNull(document.getElementById("asset-purchase-price").value),
     supplier: document.getElementById("asset-supplier").value || null,
+    useful_life_years: numOrNull(document.getElementById("asset-useful-life").value),
     warranty_until: document.getElementById("asset-warranty").value || null,
     notes: document.getElementById("asset-notes").value || null,
     updated_at: new Date().toISOString()
@@ -1149,6 +1265,55 @@ async function applyCaseFilters(){
   render();
 }
 
+async function loadGeneralCategories(){
+  const { data } = await sb.from("general_report_categories").select("*").order("sort_order");
+  state.generalCategories = data || [];
+}
+
+async function addGeneralCategory(){
+  const input = document.getElementById("new-general-category");
+  const name = input.value.trim();
+  if(!name){ alert("請輸入類別名稱"); return; }
+  const maxSort = state.generalCategories.reduce((m,c)=> Math.max(m, c.sort_order||0), 0);
+  const { error } = await sb.from("general_report_categories").insert({ name, sort_order: maxSort < 90 ? maxSort+1 : maxSort, active: true });
+  if(error){ alert("新增失敗：" + error.message); return; }
+  input.value = "";
+  await loadGeneralCategories();
+  render();
+}
+
+async function deleteGeneralCategory(id){
+  if(!confirm("確定要刪除這個類別嗎？")) return;
+  const { error } = await sb.from("general_report_categories").delete().eq("id", id);
+  if(error){ alert("刪除失敗：" + error.message); return; }
+  await loadGeneralCategories();
+  render();
+}
+
+async function resetPassword(userId, displayName){
+  const newPw = prompt(`要幫「${displayName}」設定新密碼，請輸入新密碼（至少6碼）：`);
+  if(!newPw) return;
+  if(newPw.length < 6){ alert("密碼至少需要6碼"); return; }
+  const confirmPw = prompt("請再輸入一次新密碼確認：");
+  if(newPw !== confirmPw){ alert("兩次輸入的密碼不一致，已取消"); return; }
+
+  const { data: { session } } = await sb.auth.getSession();
+  if(!session){ alert("登入逾時，請重新登入後再試"); return; }
+
+  try{
+    const res = await fetch(`${SUPABASE_URL}/functions/v1/admin-reset-password`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Authorization": `Bearer ${session.access_token}` },
+      body: JSON.stringify({ target_user_id: userId, new_password: newPw })
+    });
+    const result = await res.json();
+    if(!res.ok || result.error){ alert("重設失敗：" + (result.error || res.statusText)); return; }
+    alert(`已成功重設「${displayName}」的密碼，請把新密碼告知該門市／人員。`);
+  }catch(e){
+    alert("重設失敗：" + e.message);
+  }
+}
+
 async function loadAccounts(){
   const { data, error } = await sb.from("users_profile").select("*").order("status").order("display_name");
   if(error){ alert("載入失敗：" + error.message); return; }
@@ -1160,10 +1325,12 @@ async function loadAccounts(){
    ============================================================ */
 async function goTo(view){
   state.view = view;
+  state.editingStoreId = null;
+  state.editingContactId = null;
   if(view === "dashboard") await loadDashboard();
   else if(view === "case-list") await loadCases();
-  else if(view === "assets"){ await loadAssetMajorCategories(); await loadAssets(); }
-  else if(view === "stores"){ await loadRegions(); await loadStores(); }
+  else if(view === "assets"){ await loadAssetMajorCategories(); await loadAssetMinorCategories(); await loadAssets(); }
+  else if(view === "stores"){ await loadRegions(); await loadStores(); await loadGeneralCategories(); }
   else if(view === "contacts"){ await loadRegions(); await loadStores(); await loadContacts(); }
   else if(view === "accounts"){ await loadRegions(); await loadAccounts(); }
   else if(view === "vendors") await loadVendors();
@@ -1368,6 +1535,7 @@ async function saveStore(id){
   if(!name){ alert("門市名稱不能空白"); return; }
   const { error } = await sb.from("stores").update({ name, region_id: regionId, status }).eq("id", id);
   if(error){ alert("儲存失敗：" + error.message); return; }
+  state.editingStoreId = null;
   await loadStores();
   render();
 }
@@ -1393,6 +1561,7 @@ async function saveContact(storeId){
   };
   const { error } = await sb.from("store_contacts").upsert(payload, { onConflict: "store_id" });
   if(error){ alert("儲存失敗：" + error.message); return; }
+  state.editingContactId = null;
   await loadContacts();
   render();
 }
