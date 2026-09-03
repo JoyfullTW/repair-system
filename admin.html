@@ -161,7 +161,7 @@
 </head>
 <body>
 <div id="app"></div>
-<div class="version-badge">admin v2026-09-02.5</div>
+<div class="version-badge">admin v2026-09-02.8</div>
 
 <script>
 /* ============================================================
@@ -226,7 +226,7 @@ let state = {
   dashboardStats: null,
   caseFilters: { status:"", storeId:"", urgency:"", q:"" },
   cases: [],
-  currentCase: null, caseLogs: [], caseAttachments: [],
+  currentCase: null, caseLogs: [], caseAttachments: [], caseVendorSuggestions: [], caseVendorBestMatch: [],
   accounts: [],
   vendorFormError: "",
 };
@@ -400,7 +400,17 @@ function renderCaseDetail(){
   if(!c) return `<div class="empty">找不到案件</div>`;
 
   const statusOptions = STATUS_GROUPS.map(g=>`<optgroup label="${g.label}">${g.options.map(o=>`<option value="${o}" ${c.status===o?'selected':''}>${STATUS_LABEL[o]}</option>`).join("")}</optgroup>`).join("");
-  const vendorOptions = state.vendors.map(v=>`<option value="${v.id}" ${c.vendor_id===v.id?'selected':''}>${v.name}${v.vendor_type==='temporary'?'（臨時）':''}</option>`).join("");
+  const bestMatchList = state.caseVendorBestMatch || [];
+  const bestMatchIds2 = new Set(bestMatchList.map(v=>v.id));
+  const suggestedList = (state.caseVendorSuggestions||[]).filter(v=>!bestMatchIds2.has(v.id));
+  const suggestedIds = new Set([...bestMatchIds2, ...suggestedList.map(v=>v.id)]);
+  const bestMatchOptions = bestMatchList.map(v=>`<option value="${v.id}" ${c.vendor_id===v.id?'selected':''}>${v.category?`[${v.category}] `:''}${v.name}${v.vendor_type==='temporary'?'（臨時）':''}</option>`).join("");
+  const suggestedOptions = suggestedList.map(v=>`<option value="${v.id}" ${c.vendor_id===v.id?'selected':''}>${v.category ? `[${v.category}] ` : ''}${v.name}${v.vendor_type==='temporary'?'（臨時）':''}</option>`).join("");
+  const otherOptions = state.vendors.filter(v=>!suggestedIds.has(v.id)).map(v=>`<option value="${v.id}" ${c.vendor_id===v.id?'selected':''}>${v.name}${v.vendor_type==='temporary'?'（臨時）':''}</option>`).join("");
+  const vendorOptions = (bestMatchOptions ? `<optgroup label="🎯 最符合這台設備">${bestMatchOptions}</optgroup>` : "") +
+    (suggestedOptions ? `<optgroup label="⭐ 本店常用廠商">${suggestedOptions}</optgroup>` : "") +
+    `<optgroup label="${(bestMatchOptions||suggestedOptions) ? '其他廠商' : '全部廠商'}">${otherOptions}</optgroup>`;
+  const selectedVendorInfo = c.vendor_id ? state.vendors.find(v=>v.id===c.vendor_id) : null;
 
   const attachCategories = Object.keys(ATTACH_CATEGORY_LABEL);
   const attachByCategory = {};
@@ -447,11 +457,14 @@ function renderCaseDetail(){
         <label class="field-label">門市自付金額</label>
         <input type="number" id="edit-store-pay" value="${c.store_pay_amount||''}">
 
-        <label class="field-label">廠商</label>
+        <label class="field-label">廠商${bestMatchList.length ? ' <span style="color:var(--ok); text-transform:none; font-weight:400;">（已依設備名稱找到最相關廠商，見選單最上方）</span>' : ''}</label>
         <div style="display:flex; gap:8px;">
           <select id="edit-vendor" style="flex:1;"><option value="">— 未指定 —</option>${vendorOptions}</select>
           <button class="btn btn-outline btn-sm" data-action="quick-add-vendor">＋臨時廠商</button>
         </div>
+        <p id="edit-vendor-contact-hint" style="font-size:12px; color:var(--ink-soft); margin:6px 0 0;">
+          ${selectedVendorInfo ? `聯絡人：${selectedVendorInfo.contact_person||'—'}　電話：${selectedVendorInfo.phone||'—'}　LINE/其他：${selectedVendorInfo.line_contact||'—'}` : ''}
+        </p>
 
         <div class="grid grid-2">
           <div><label class="field-label">報價金額</label><input type="number" id="edit-quote" value="${c.quote_amount||''}"></div>
@@ -916,6 +929,7 @@ function renderVendors(){
               <td style="white-space:nowrap;">
                 <button class="btn btn-primary btn-sm" data-action="save-vendor-row" data-id="${v.id}">儲存</button>
                 <button class="btn btn-outline btn-sm" data-action="cancel-edit-vendor">取消</button>
+                <button class="btn btn-outline btn-sm" data-action="delete-vendor-row" data-id="${v.id}" data-name="${v.name}" style="color:var(--err, #C13F3F); border-color:var(--err, #C13F3F);">🗑 刪除</button>
               </td>
             </tr>`;
           }).join("");
@@ -1015,6 +1029,14 @@ function bindEvents(){
     minorSel.innerHTML = `<option value="">${opts.length ? '— 請選擇 —' : '— 請先選設備大類 —'}</option>` +
       opts.map(m=>`<option value="${m.code}">${m.code} ${m.name}</option>`).join("");
   });
+
+  const editVendorSel = document.getElementById("edit-vendor");
+  if(editVendorSel) editVendorSel.addEventListener("change", ()=>{
+    const hint = document.getElementById("edit-vendor-contact-hint");
+    if(!hint) return;
+    const v = state.vendors.find(v=>v.id===editVendorSel.value);
+    hint.textContent = v ? `聯絡人：${v.contact_person||'—'}　電話：${v.phone||'—'}　LINE/其他：${v.line_contact||'—'}` : '';
+  });
 }
 
 async function onAction(e){
@@ -1040,6 +1062,7 @@ async function onAction(e){
   else if(action === "edit-vendor-row"){ state.editingVendorId = el.dataset.id; render(); }
   else if(action === "cancel-edit-vendor"){ state.editingVendorId = null; render(); }
   else if(action === "save-vendor-row"){ await saveVendorRow(el.dataset.id); }
+  else if(action === "delete-vendor-row"){ await deleteVendorRow(el.dataset.id, el.dataset.name); }
   else if(action === "apply-vendor-filter"){ state.vendorFilterQ = document.getElementById("vendor-filter-q")?.value || ""; render(); }
   else if(action === "add-region"){ await addRegion(); }
   else if(action === "add-store"){ await addStore(); }
@@ -1539,6 +1562,55 @@ async function openCase(id){
   render();
   loadCaseLogs(id);
   loadCaseAttachments(id);
+  loadCaseVendorSuggestions(data.store_id, data.asset_id);
+}
+
+async function loadCaseVendorSuggestions(storeId, assetId){
+  state.caseVendorSuggestions = [];
+  state.caseVendorBestMatch = [];
+  if(!storeId) { if(state.view==="case-detail") render(); return; }
+
+  const { data } = await sb.from("vendor_assignment_rules")
+    .select("category, priority, note, vendor_id, vendors(id, name, vendor_type)")
+    .eq("scope_type","store").eq("store_id", storeId)
+    .order("category").order("priority");
+  const rules = (data||[]).filter(r=>r.vendors);
+
+  let assetName = "";
+  if(assetId){
+    const { data: assetRow } = await sb.from("assets").select("name").eq("id", assetId).maybeSingle();
+    assetName = assetRow?.name || "";
+  }
+  // 去掉編號、方位這類無關的字，只留設備核心名稱，供關鍵字比對用
+  const cleanTerm = (s)=> (s||"").replace(/\d+/g,"").replace(/[（(].*?[)）]/g,"").trim();
+  const coreAssetName = cleanTerm(assetName);
+
+  const bestMatchIds = new Set();
+  const bestMatch = [];
+  if(coreAssetName){
+    rules.forEach(r=>{
+      const note = cleanTerm(r.note);
+      if(!note) return;
+      const overlap = coreAssetName.length>=2 && note.length>=2 && (note.includes(coreAssetName) || coreAssetName.includes(note) ||
+        [...Array(Math.max(coreAssetName.length-1,0))].some((_,i)=> coreAssetName.slice(i,i+2) && note.includes(coreAssetName.slice(i,i+2))));
+      if(overlap && !bestMatchIds.has(r.vendor_id)){
+        bestMatchIds.add(r.vendor_id);
+        bestMatch.push({ id:r.vendor_id, name:r.vendors.name, vendor_type:r.vendors.vendor_type, category:r.category, note:r.note });
+      }
+    });
+  }
+
+  const seen = new Set(bestMatchIds);
+  const list = [];
+  rules.forEach(r=>{
+    if(seen.has(r.vendor_id)) return;
+    seen.add(r.vendor_id);
+    list.push({ id:r.vendor_id, name:r.vendors.name, vendor_type:r.vendors.vendor_type, category:r.category });
+  });
+
+  state.caseVendorBestMatch = bestMatch;
+  state.caseVendorSuggestions = list;
+  if(state.view === "case-detail") render();
 }
 
 async function loadCaseLogs(caseId){
@@ -1784,6 +1856,26 @@ function exportContacts(){
 /* ============================================================
    廠商管理
    ============================================================ */
+async function deleteVendorRow(id, name){
+  const { count, error: countErr } = await sb.from("vendor_assignment_rules").select("id", { count: "exact", head: true }).eq("vendor_id", id);
+  if(countErr){ alert("檢查失敗：" + countErr.message); return; }
+
+  if(count > 0){
+    const proceed = confirm(`「${name}」目前還有 ${count} 筆廠商指派規則在使用中。\n\n直接刪除會把這 ${count} 筆規則一併移除（那些門市／類別會變成沒有指定廠商）。\n\n確定要繼續刪除嗎？`);
+    if(!proceed) return;
+    const { error: delRulesErr } = await sb.from("vendor_assignment_rules").delete().eq("vendor_id", id);
+    if(delRulesErr){ alert("刪除關聯規則失敗：" + delRulesErr.message); return; }
+  } else {
+    if(!confirm(`確定要刪除「${name}」嗎？`)) return;
+  }
+
+  const { error } = await sb.from("vendors").delete().eq("id", id);
+  if(error){ alert("刪除失敗：" + error.message); return; }
+  state.editingVendorId = null;
+  await loadVendors();
+  render();
+}
+
 async function saveVendorRow(id){
   const row = document.querySelector(`tr[data-vendor-row="${id}"]`);
   const name = row.querySelector('[data-field="name"]').value.trim();
