@@ -161,7 +161,7 @@
 </head>
 <body>
 <div id="app"></div>
-<div class="version-badge">admin v2026-09-02.8</div>
+<div class="version-badge">admin v2026-09-03.2</div>
 
 <script>
 /* ============================================================
@@ -219,9 +219,9 @@ let state = {
   stores: [], vendors: [], regions: [],
   storeFormError: "",
   assets: [], assetMajorCategories: [], assetMinorCategories: [],
-  assetFilters: { storeId:"", majorCode:"", q:"", noPhotoOnly:false }, assetPhotoCounts: {},
+  assetFilters: { storeId:"", majorCode:"", q:"", noPhotoOnly:false }, assetPhotoCounts: {}, showCopyAssetsPanel: false,
   currentAsset: null, assetFormError: "", assetLogs: [], assetAttachments: [],
-  assignmentRules: [], assignmentFilters: { storeId:"", confirmStatus:"" }, assignmentFormError: "",
+  assignmentRules: [], assignmentFilters: { storeId:"", confirmStatus:"" }, assignmentFormError: "", showCopyRulesPanel: false,
   contacts: [], editingStoreId: null, editingContactId: null, generalCategories: [], editingVendorId: null, vendorFilterQ: "",
   dashboardStats: null,
   caseFilters: { status:"", storeId:"", urgency:"", q:"" },
@@ -750,9 +750,26 @@ function renderAssets(){
     </label>
     <button class="btn btn-outline btn-sm" data-action="apply-asset-filters">套用篩選</button>
     <button class="btn btn-outline btn-sm" data-action="export-assets">📤 匯出目前清單</button>
+    <button class="btn btn-outline btn-sm" data-action="toggle-copy-assets-panel">📋 從其他門市複製資產清單</button>
     <button class="btn btn-primary btn-sm" data-action="new-asset" style="margin-left:auto;">＋新增資產</button>
   </div>
   ${f.storeId ? "" : `<p style="font-size:12px; color:var(--ink-soft); margin:-6px 0 12px;">💡 想匯出「單一門市的完整清單」，先在上面選好門市、按套用篩選，再按匯出。</p>`}
+  ${state.showCopyAssetsPanel ? `
+  <div class="card" style="border-color:var(--steel, var(--primary));">
+    <div class="section-title" style="margin-top:0;">從範本門市複製資產清單</div>
+    <p style="font-size:12px; color:var(--ink-soft); margin:0 0 12px;">
+      適合新開店時使用：選一家設備配置相似的「範本門市」，系統會依「目前篩選的門市」為目標，把範本店的資產名稱＋分類複製一份過去（自動產生新編號），<strong>不會複製購買日期／金額／照片／廠商</strong>，這些請複製完再個別補上。
+    </p>
+    ${!f.storeId ? `<p style="color:var(--warn);">請先在上方篩選列選好「目標門市」（要新增資產的那家店），按套用篩選後再回來這裡操作。</p>` : `
+    <label class="field-label">範本門市（複製來源）</label>
+    <select id="copy-assets-source-store">
+      <option value="">請選擇…</option>
+      ${state.stores.filter(s=>s.status==='active' && s.id!==f.storeId).map(s=>`<option value="${s.id}">${s.code?('['+s.code+'] '):''}${s.name}</option>`).join("")}
+    </select>
+    <p style="font-size:12px; color:var(--ink-soft); margin:8px 0 0;">目標門市：<strong>${state.stores.find(s=>s.id===f.storeId)?.name || ''}</strong></p>
+    <button class="btn btn-primary btn-sm" style="margin-top:12px;" data-action="copy-assets-from-template">開始複製</button>
+    `}
+  </div>` : ""}
   <div class="card" style="padding:0; overflow-x:auto;">
     <table>
       <thead><tr><th>資產編號</th><th>名稱</th><th>門市</th><th>狀態</th><th>來源</th><th>照片</th><th></th></tr></thead>
@@ -966,7 +983,22 @@ function renderAssignmentRules(){
       <option value="confirmed" ${f.confirmStatus==='confirmed'?'selected':''}>已確認</option>
     </select>
     <button class="btn btn-outline btn-sm" data-action="apply-rule-filters">套用篩選</button>
+    <button class="btn btn-outline btn-sm" data-action="toggle-copy-rules-panel">📋 從其他門市複製規則</button>
   </div>
+
+  ${state.showCopyRulesPanel ? `
+  <div class="card" style="border-color:var(--steel, var(--primary));">
+    <div class="section-title" style="margin-top:0;">從範本門市複製廠商指派規則</div>
+    <p style="font-size:12px; color:var(--ink-soft); margin:0 0 12px;">
+      把範本店的類別＋廠商配置複製到「${state.stores.find(s=>s.id===f.storeId)?.name||'目前選的門市'}」，複製後可以再針對這家店個別調整廠商（例如換一家配合的空調廠商）。已經有的類別規則不會被覆蓋，只會新增沒有的。
+    </p>
+    <label class="field-label">範本門市（複製來源）</label>
+    <select id="copy-rules-source-store">
+      <option value="">請選擇…</option>
+      ${state.stores.filter(s=>s.status==='active' && s.id!==f.storeId).map(s=>`<option value="${s.id}">${s.code?('['+s.code+'] '):''}${s.name}</option>`).join("")}
+    </select>
+    <button class="btn btn-primary btn-sm" style="margin-top:12px;" data-action="copy-rules-from-template">開始複製</button>
+  </div>` : ""}
 
   <div class="card">
     <div class="section-title" style="margin-top:0;">新增規則</div>
@@ -1083,6 +1115,10 @@ async function onAction(e){
   else if(action === "suggest-asset-no"){ await suggestAssetNo(); }
   else if(action === "suggest-asset-category"){ suggestAssetCategory(); }
   else if(action === "export-assets"){ await exportAssets(); }
+  else if(action === "toggle-copy-assets-panel"){ state.showCopyAssetsPanel = !state.showCopyAssetsPanel; render(); }
+  else if(action === "copy-assets-from-template"){ await copyAssetsFromTemplate(); }
+  else if(action === "toggle-copy-rules-panel"){ state.showCopyRulesPanel = !state.showCopyRulesPanel; render(); }
+  else if(action === "copy-rules-from-template"){ await copyRulesFromTemplate(); }
   else if(action === "reset-password"){ await resetPassword(el.dataset.id, el.dataset.name); }
   else if(action === "add-general-category"){ await addGeneralCategory(); }
   else if(action === "delete-general-category"){ await deleteGeneralCategory(el.dataset.id); }
@@ -1234,6 +1270,59 @@ const CATEGORY_KEYWORD_MAP = [
   [["招牌工程","標示"], "A", "008"],
   [["裝修"], "A", "004"],
 ];
+
+async function copyAssetsFromTemplate(){
+  const sourceStoreId = document.getElementById("copy-assets-source-store")?.value;
+  const targetStoreId = state.assetFilters.storeId;
+  if(!sourceStoreId){ alert("請先選擇範本門市"); return; }
+  if(!targetStoreId){ alert("請先在篩選列選好目標門市"); return; }
+
+  const targetStore = state.stores.find(s=>s.id===targetStoreId);
+  if(!confirm(`確定要把範本店的資產清單複製到「${targetStore.name}」嗎？\n\n只會複製資產名稱與分類，購買資訊、廠商、照片都不會複製，需要之後再個別補上。`)) return;
+
+  const { data: sourceAssets, error: srcErr } = await sb.from("assets")
+    .select("name, major_code, minor_category_id")
+    .eq("store_id", sourceStoreId);
+  if(srcErr){ alert("讀取範本資產失敗：" + srcErr.message); return; }
+  if(!sourceAssets || sourceAssets.length===0){ alert("範本門市目前沒有任何資產可以複製"); return; }
+
+  const minorIds = [...new Set(sourceAssets.map(a=>a.minor_category_id).filter(Boolean))];
+  const { data: minorRows } = await sb.from("asset_minor_categories").select("id, major_code, code").in("id", minorIds.length?minorIds:['00000000-0000-0000-0000-000000000000']);
+  const minorById = {}; (minorRows||[]).forEach(m=> minorById[m.id]=m);
+
+  const { data: existingTargetAssets } = await sb.from("assets").select("asset_no").eq("store_id", targetStoreId);
+  const seqCounters = {};
+  (existingTargetAssets||[]).forEach(a=>{
+    const m = (a.asset_no||"").match(/^([ACFG])\d{3}-(\d{2})-(\d{3})-(\d{4})$/);
+    if(m){
+      const key = `${m[1]}-${m[2]}-${m[3]}`;
+      seqCounters[key] = Math.max(seqCounters[key]||0, parseInt(m[4],10));
+    }
+  });
+
+  const yy = String(new Date().getFullYear()).slice(2,4);
+  const rows = [];
+  let skipped = 0;
+  for(const a of sourceAssets){
+    const minorCat = a.minor_category_id ? minorById[a.minor_category_id] : null;
+    if(!a.major_code || !minorCat){ skipped++; continue; }
+    const key = `${a.major_code}-${yy}-${minorCat.code}`;
+    seqCounters[key] = (seqCounters[key]||0) + 1;
+    const assetNo = `${a.major_code}${targetStore.code}-${yy}-${minorCat.code}-${String(seqCounters[key]).padStart(4,'0')}`;
+    rows.push({
+      asset_no: assetNo, name: a.name, major_code: a.major_code,
+      minor_category_id: a.minor_category_id, store_id: targetStoreId, status: 'in_use'
+    });
+  }
+
+  const { error: insErr } = await sb.from("assets").insert(rows);
+  if(insErr){ alert("複製失敗：" + insErr.message); return; }
+
+  alert(`複製完成！新增了 ${rows.length} 筆資產到「${targetStore.name}」${skipped ? `（${skipped} 筆因範本資料缺分類而略過）` : ''}。\n記得之後補上購買日期、金額、廠商與照片。`);
+  state.showCopyAssetsPanel = false;
+  await loadAssets();
+  render();
+}
 
 async function exportAssets(){
   if(!window.XLSX){ alert("匯出功能載入失敗，請重新整理頁面再試一次"); return; }
@@ -1562,12 +1651,13 @@ async function openCase(id){
   render();
   loadCaseLogs(id);
   loadCaseAttachments(id);
-  loadCaseVendorSuggestions(data.store_id, data.asset_id);
+  loadCaseVendorSuggestions(data);
 }
 
-async function loadCaseVendorSuggestions(storeId, assetId){
+async function loadCaseVendorSuggestions(caseData){
   state.caseVendorSuggestions = [];
   state.caseVendorBestMatch = [];
+  const storeId = caseData?.store_id;
   if(!storeId) { if(state.view==="case-detail") render(); return; }
 
   const { data } = await sb.from("vendor_assignment_rules")
@@ -1576,23 +1666,29 @@ async function loadCaseVendorSuggestions(storeId, assetId){
     .order("category").order("priority");
   const rules = (data||[]).filter(r=>r.vendors);
 
-  let assetName = "";
-  if(assetId){
-    const { data: assetRow } = await sb.from("assets").select("name").eq("id", assetId).maybeSingle();
-    assetName = assetRow?.name || "";
+  // 有連動資產：用資產名稱比對；一般報修（無資產）：改用故障類別＋描述文字比對
+  let searchText = "";
+  if(caseData.asset_id){
+    const { data: assetRow } = await sb.from("assets").select("name").eq("id", caseData.asset_id).maybeSingle();
+    searchText = assetRow?.name || "";
+  } else {
+    searchText = [caseData.general_category, caseData.fault_category, caseData.fault_description].filter(Boolean).join(" ");
   }
-  // 去掉編號、方位這類無關的字，只留設備核心名稱，供關鍵字比對用
+  // 去掉編號、方位這類無關的字，只留核心關鍵字，供比對用
   const cleanTerm = (s)=> (s||"").replace(/\d+/g,"").replace(/[（(].*?[)）]/g,"").trim();
-  const coreAssetName = cleanTerm(assetName);
+  const coreTerm = cleanTerm(searchText);
 
   const bestMatchIds = new Set();
   const bestMatch = [];
-  if(coreAssetName){
+  if(coreTerm){
     rules.forEach(r=>{
       const note = cleanTerm(r.note);
-      if(!note) return;
-      const overlap = coreAssetName.length>=2 && note.length>=2 && (note.includes(coreAssetName) || coreAssetName.includes(note) ||
-        [...Array(Math.max(coreAssetName.length-1,0))].some((_,i)=> coreAssetName.slice(i,i+2) && note.includes(coreAssetName.slice(i,i+2))));
+      const cat = cleanTerm(r.category);
+      const targets = [note, cat].filter(Boolean);
+      const overlap = targets.some(t=>
+        t.length>=2 && (coreTerm.includes(t) || t.includes(coreTerm) ||
+          [...Array(Math.max(coreTerm.length-1,0))].some((_,i)=> coreTerm.slice(i,i+2) && t.includes(coreTerm.slice(i,i+2))))
+      );
       if(overlap && !bestMatchIds.has(r.vendor_id)){
         bestMatchIds.add(r.vendor_id);
         bestMatch.push({ id:r.vendor_id, name:r.vendors.name, vendor_type:r.vendors.vendor_type, category:r.category, note:r.note });
@@ -1921,6 +2017,43 @@ async function applyRuleFilters(){
   state.assignmentFilters.storeId = document.getElementById("rule-filter-store")?.value || "";
   state.assignmentFilters.confirmStatus = document.getElementById("rule-filter-confirm")?.value || "";
   if(state.assignmentFilters.storeId) await loadAssignmentRules();
+  render();
+}
+
+async function copyRulesFromTemplate(){
+  const sourceStoreId = document.getElementById("copy-rules-source-store")?.value;
+  const targetStoreId = state.assignmentFilters.storeId;
+  if(!sourceStoreId){ alert("請先選擇範本門市"); return; }
+  if(!targetStoreId){ alert("請先選好要複製到哪家門市"); return; }
+
+  const targetStore = state.stores.find(s=>s.id===targetStoreId);
+  if(!confirm(`確定要把範本店的廠商指派規則複製到「${targetStore.name}」嗎？`)) return;
+
+  const { data: sourceRules, error: srcErr } = await sb.from("vendor_assignment_rules")
+    .select("category, priority, note, vendor_id")
+    .eq("scope_type","store").eq("store_id", sourceStoreId);
+  if(srcErr){ alert("讀取範本規則失敗：" + srcErr.message); return; }
+  if(!sourceRules || sourceRules.length===0){ alert("範本門市目前沒有指派規則可以複製"); return; }
+
+  const { data: existingRules } = await sb.from("vendor_assignment_rules")
+    .select("category, vendor_id").eq("scope_type","store").eq("store_id", targetStoreId);
+  const existingKeys = new Set((existingRules||[]).map(r=>`${r.category}|${r.vendor_id}`));
+
+  const rows = sourceRules
+    .filter(r=> !existingKeys.has(`${r.category}|${r.vendor_id}`))
+    .map(r=>({
+      category: r.category, scope_type: "store", store_id: targetStoreId,
+      vendor_id: r.vendor_id, priority: r.priority, note: r.note, confirm_status: "pending"
+    }));
+
+  if(rows.length === 0){ alert("範本店的規則跟目前這家門市完全一樣，沒有新的可以複製。"); return; }
+
+  const { error: insErr } = await sb.from("vendor_assignment_rules").insert(rows);
+  if(insErr){ alert("複製失敗：" + insErr.message); return; }
+
+  alert(`複製完成！新增了 ${rows.length} 筆規則到「${targetStore.name}」，記得檢查一下有沒有需要換成這家店專屬的廠商。`);
+  state.showCopyRulesPanel = false;
+  await loadAssignmentRules();
   render();
 }
 
