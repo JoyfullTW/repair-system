@@ -209,7 +209,7 @@
     載入中…如果這段文字一直沒有消失，代表網頁程式無法執行，請截圖回報。
   </div>
 </div>
-<div class="version-badge">store v2026-09-03.1</div>
+<div class="version-badge">store v2026-09-03.2</div>
 
 <script>
 /* ============================================================
@@ -289,7 +289,7 @@ let state = {
     newStore: { code:"", name:"", regionId:"" }, storeFormError:"", lastCreatedStoreId:"",
     newAsset: { storeId:"", assetNo:"", name:"", majorCode:"", minorCode:"", brand:"", model:"", serialNo:"", source:"" },
     assetFormError:"", assetSessionCount:0, sessionAssets:[],
-    newInfra: { storeId:"", itemType:"", description:"", relatedArea:"", photoFile:null, photoPreviewUrl:null },
+    newInfra: { storeId:"", itemType:"", description:"", relatedArea:"", photoFile:null, photoPreviewUrl:null, latitude:null, longitude:null, compassHeading:null },
     infraFormError:"", infraSessionCount:0,
     photoStoreId:"", photoAssetResults:[], photoSelectedAsset:null, photoAssetAttachments:[],
   },
@@ -788,8 +788,10 @@ function renderSetupNewInfra(){
   const storeOptions = s.allStores.map(st=>`<option value="${st.id}" ${s.newInfra.storeId===st.id?'selected':''}>${st.code?('['+st.code+'] '):''}${st.name}</option>`).join("");
   const typeLabel = {
     wiring_diagram:"配電線路圖", main_power_location:"總電源位置", breaker_mapping:"分路開關對應",
-    ac_type_location:"冷氣型式與位置", gas_main_valve:"瓦斯總開關", other:"其他"
+    ac_type_location:"冷氣型式與位置", gas_main_valve:"瓦斯總開關",
+    storefront_location:"門口定位照片（廢清書用）", other:"其他"
   };
+  const isLocationType = s.newInfra.itemType === "storefront_location";
   return `
   <header class="topbar">
     <span class="back" data-action="go-setup-menu">‹</span>
@@ -808,6 +810,13 @@ function renderSetupNewInfra(){
     <textarea id="su-infra-desc" placeholder="例如：總開關位於吧台後方牆面，黑色鐵箱">${s.newInfra.description}</textarea>
     <label class="field-label">對應設備/區域（選填）</label>
     <input type="text" id="su-infra-area" value="${s.newInfra.relatedArea}" placeholder="例如：廚房插座">
+    ${isLocationType ? `
+    <label class="field-label">GPS 定位</label>
+    <button type="button" class="btn btn-outline" data-action="capture-infra-location" style="width:100%;">📍 取得目前定位</button>
+    <p style="font-size:12px; color:var(--ink-soft); margin:6px 0 0;">
+      ${s.newInfra.latitude ? `已取得座標：${s.newInfra.latitude.toFixed(6)}, ${s.newInfra.longitude.toFixed(6)}${s.newInfra.compassHeading!=null ? `，朝向約 ${Math.round(s.newInfra.compassHeading)}°` : '（此手機/瀏覽器無法取得指南針方向，略過不影響定位）'}` : '尚未取得定位，請按上面按鈕（第一次會請你允許存取位置）'}
+    </p>
+    ` : ""}
     <label class="field-label">照片</label>
     <div class="upload-grid" style="grid-template-columns:repeat(3,1fr); max-width:220px;">
       <div class="upload-slot" data-action="upload-infra-photo">
@@ -1043,6 +1052,7 @@ async function onAction(e){
     await loadAllStoresForSetup();
     state.view = "setup-new-infra"; render();
   }
+  else if(action === "capture-infra-location"){ await captureInfraLocation(); }
   else if(action === "go-setup-asset-photo"){
     await loadAllStoresForSetup();
     state.setup.photoStoreId = ""; state.setup.photoAssetResults = [];
@@ -1391,6 +1401,50 @@ async function suggestAssetNoMobile(){
   hint.style.color = "var(--ok, #2F8F5B)";
 }
 
+async function captureInfraLocation(){
+  if(!navigator.geolocation){
+    alert("這個瀏覽器不支援定位功能");
+    return;
+  }
+  try{
+    const pos = await new Promise((resolve, reject)=>{
+      navigator.geolocation.getCurrentPosition(resolve, reject, { enableHighAccuracy:true, timeout:10000 });
+    });
+    state.setup.newInfra.latitude = pos.coords.latitude;
+    state.setup.newInfra.longitude = pos.coords.longitude;
+  }catch(err){
+    alert("無法取得定位，請確認已允許瀏覽器存取位置權限：" + err.message);
+    return;
+  }
+
+  // 指南針方向：盡力嘗試，抓不到就跳過，不影響GPS定位結果
+  try{
+    if(typeof DeviceOrientationEvent !== "undefined" && typeof DeviceOrientationEvent.requestPermission === "function"){
+      const perm = await DeviceOrientationEvent.requestPermission();
+      if(perm !== "granted"){ render(); return; }
+    }
+    await new Promise((resolve)=>{
+      let done = false;
+      const handler = (e)=>{
+        if(done) return;
+        const heading = e.webkitCompassHeading != null ? e.webkitCompassHeading : (e.absolute && e.alpha != null ? (360 - e.alpha) : null);
+        if(heading != null){
+          state.setup.newInfra.compassHeading = heading;
+          done = true;
+          window.removeEventListener("deviceorientation", handler);
+          resolve();
+        }
+      };
+      window.addEventListener("deviceorientation", handler);
+      setTimeout(()=>{
+        if(!done){ window.removeEventListener("deviceorientation", handler); resolve(); }
+      }, 1500);
+    });
+  }catch(e){ /* 指南針取得失敗，不影響流程 */ }
+
+  render();
+}
+
 async function searchAssetForPhoto(){
   const storeId = document.getElementById("photo-store-select")?.value;
   const q = document.getElementById("photo-asset-search")?.value.trim();
@@ -1531,6 +1585,9 @@ async function submitNewInfra(){
     description: description || null,
     related_area: document.getElementById("su-infra-area").value || null,
     photo_url: photoUrl,
+    latitude: su.newInfra.latitude ?? null,
+    longitude: su.newInfra.longitude ?? null,
+    compass_heading: su.newInfra.compassHeading ?? null,
     created_by: state.profile?.id || null
   };
 
@@ -1539,7 +1596,7 @@ async function submitNewInfra(){
 
   su.infraFormError = "";
   su.infraSessionCount += 1;
-  su.newInfra = { storeId, itemType:"", description:"", relatedArea:"", photoFile:null, photoPreviewUrl:null };
+  su.newInfra = { storeId, itemType:"", description:"", relatedArea:"", photoFile:null, photoPreviewUrl:null, latitude:null, longitude:null, compassHeading:null };
   render();
 }
 

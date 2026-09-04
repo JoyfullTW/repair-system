@@ -161,7 +161,7 @@
 </head>
 <body>
 <div id="app"></div>
-<div class="version-badge">admin v2026-09-03.3</div>
+<div class="version-badge">admin v2026-09-03.4</div>
 
 <script>
 /* ============================================================
@@ -223,6 +223,7 @@ let state = {
   currentAsset: null, assetFormError: "", assetLogs: [], assetAttachments: [],
   assignmentRules: [], assignmentFilters: { storeId:"", confirmStatus:"" }, assignmentFormError: "", showCopyRulesPanel: false,
   contacts: [], editingStoreId: null, editingContactId: null, generalCategories: [], editingVendorId: null, vendorFilterQ: "",
+  infraFilters: { storeId: "" }, infraRecords: [],
   dashboardStats: null,
   caseFilters: { status:"", storeId:"", urgency:"", q:"" },
   cases: [],
@@ -282,6 +283,7 @@ function renderSidebar(){
     { key:"assets", label:"資產管理", ico:"🧊" },
     { key:"stores", label:"門市管理", ico:"🏬" },
     { key:"contacts", label:"通訊錄", ico:"📇" },
+    { key:"infrastructure", label:"門市基礎設施", ico:"🔌" },
     { key:"accounts", label:"帳號管理", ico:"👤" },
     { key:"vendors", label:"廠商管理", ico:"🧰" },
     { key:"assignment-rules", label:"廠商指派規則", ico:"🗂️" },
@@ -300,7 +302,7 @@ function renderSidebar(){
 }
 
 function renderTopbar(){
-  const titles = { dashboard:"Dashboard", "case-list":"案件列表", "case-detail":"案件詳情", assets:"資產管理", "asset-detail":"資產詳情", stores:"門市管理", contacts:"通訊錄", accounts:"帳號管理", vendors:"廠商管理", "assignment-rules":"廠商指派規則" };
+  const titles = { dashboard:"Dashboard", "case-list":"案件列表", "case-detail":"案件詳情", assets:"資產管理", "asset-detail":"資產詳情", stores:"門市管理", contacts:"通訊錄", infrastructure:"門市基礎設施", accounts:"帳號管理", vendors:"廠商管理", "assignment-rules":"廠商指派規則" };
   const showBack = state.view === "case-detail" || state.view === "asset-detail";
   return `
   <div class="topbar">
@@ -317,6 +319,7 @@ function renderViewBody(){
   if(state.view === "asset-detail") return renderAssetDetail();
   if(state.view === "stores") return renderStores();
   if(state.view === "contacts") return renderContacts();
+  if(state.view === "infrastructure") return renderInfrastructure();
   if(state.view === "accounts") return renderAccounts();
   if(state.view === "vendors") return renderVendors();
   if(state.view === "assignment-rules") return renderAssignmentRules();
@@ -729,6 +732,40 @@ function renderContacts(){
   </div>`;
 }
 
+/* ---------------- 門市基礎設施 ---------------- */
+const INFRA_TYPE_LABEL = {
+  wiring_diagram:"配電線路圖", main_power_location:"總電源位置", breaker_mapping:"分路開關對應",
+  ac_type_location:"冷氣型式與位置", gas_main_valve:"瓦斯總開關",
+  storefront_location:"門口定位照片（廢清書用）", other:"其他"
+};
+
+function renderInfrastructure(){
+  const f = state.infraFilters || { storeId:"" };
+  const storeOptions = state.stores.filter(s=>s.status==='active').map(s=>`<option value="${s.id}" ${f.storeId===s.id?'selected':''}>${s.code?('['+s.code+'] '):''}${s.name}</option>`).join("");
+  const rows = state.infraRecords || [];
+  return `
+  <div class="filter-bar">
+    <select id="infra-filter-store"><option value="">全部門市</option>${storeOptions}</select>
+    <button class="btn btn-outline btn-sm" data-action="apply-infra-filters">套用篩選</button>
+  </div>
+  ${!f.storeId ? `<p style="font-size:12px; color:var(--ink-soft); margin:-6px 0 12px;">💡 請先選門市再套用篩選，這頁不會一次載入全部門市的資料。</p>` : ""}
+  ${rows.length===0 ? `<div class="card" style="text-align:center; color:var(--ink-soft); padding:30px;">${f.storeId ? '這家門市目前沒有基礎設施紀錄' : '請先選擇門市'}</div>` : `
+  <div class="attach-grid" style="grid-template-columns:repeat(auto-fill, minmax(180px,1fr));">
+    ${rows.map(r=>`
+      <div class="card" style="padding:0; overflow:hidden;">
+        ${r.photo_url ? `<a href="${r.photo_url}" target="_blank"><img src="${r.photo_url}" style="width:100%; height:140px; object-fit:cover; display:block;" onerror="this.style.display='none'"></a>` : `<div style="height:60px; display:flex; align-items:center; justify-content:center; color:var(--ink-soft); font-size:12px; background:var(--bg);">無照片</div>`}
+        <div style="padding:12px;">
+          <div style="font-weight:700; font-size:13px;">${INFRA_TYPE_LABEL[r.item_type]||r.item_type}</div>
+          ${r.related_area ? `<div style="font-size:12px; color:var(--ink-soft);">${r.related_area}</div>` : ""}
+          ${r.description ? `<div style="font-size:12px; margin-top:6px;">${r.description}</div>` : ""}
+          ${r.latitude ? `<a href="https://www.google.com/maps?q=${r.latitude},${r.longitude}" target="_blank" style="font-size:12px; display:block; margin-top:6px; color:var(--steel-dark, var(--primary));">📍 在 Google 地圖開啟${r.compass_heading!=null?`（朝向 ${Math.round(r.compass_heading)}°）`:''}</a>` : ""}
+          <div style="font-size:11px; color:var(--ink-soft); margin-top:8px;">${new Date(r.created_at).toLocaleDateString('zh-TW')}</div>
+          <button class="btn btn-outline btn-sm" style="margin-top:8px; color:var(--err,#C13F3F); border-color:var(--err,#C13F3F);" data-action="delete-infra-record" data-id="${r.id}">🗑 刪除</button>
+        </div>
+      </div>`).join("")}
+  </div>`}`;
+}
+
 /* ---------------- 資產管理 ---------------- */
 const ASSET_STATUS_LABEL = {
   in_use:"使用中", standby:"備用", under_repair:"送修中", disabled:"停用",
@@ -1112,6 +1149,8 @@ async function onAction(e){
   else if(action === "edit-contact"){ state.editingContactId = el.dataset.id; render(); }
   else if(action === "cancel-edit-contact"){ state.editingContactId = null; render(); }
   else if(action === "export-contacts"){ exportContacts(); }
+  else if(action === "apply-infra-filters"){ state.infraFilters.storeId = document.getElementById("infra-filter-store")?.value || ""; await loadInfraRecords(); render(); }
+  else if(action === "delete-infra-record"){ await deleteInfraRecord(el.dataset.id); }
   else if(action === "apply-asset-filters"){ await applyAssetFilters(); }
   else if(action === "open-asset"){ await openAsset(el.dataset.id); }
   else if(action === "new-asset"){ newAssetForm(); }
@@ -1658,6 +1697,7 @@ async function goTo(view){
   else if(view === "assets"){ await loadAssetMajorCategories(); await loadAssetMinorCategories(); await loadAssets(); }
   else if(view === "stores"){ await loadRegions(); await loadStores(); await loadGeneralCategories(); }
   else if(view === "contacts"){ await loadRegions(); await loadStores(); await loadContacts(); }
+  else if(view === "infrastructure"){ await loadStores(); await loadInfraRecords(); }
   else if(view === "accounts"){ await loadRegions(); await loadAccounts(); }
   else if(view === "vendors") await loadVendors();
   else if(view === "assignment-rules") await loadVendors();
@@ -1925,6 +1965,32 @@ async function saveStore(id){
 /* ============================================================
    通訊錄
    ============================================================ */
+async function loadInfraRecords(){
+  if(!state.infraFilters.storeId){ state.infraRecords = []; return; }
+  const { data, error } = await sb.from("store_infrastructure").select("*").eq("store_id", state.infraFilters.storeId).order("created_at",{ascending:false});
+  if(error){ alert("載入失敗：" + error.message); return; }
+  state.infraRecords = data || [];
+}
+
+async function deleteInfraRecord(id){
+  if(!confirm("確定要刪除這筆紀錄嗎？")) return;
+  const record = state.infraRecords.find(r=>r.id===id);
+  const { error } = await sb.from("store_infrastructure").delete().eq("id", id);
+  if(error){ alert("刪除失敗：" + error.message); return; }
+  try{
+    if(record?.photo_url){
+      const marker = "/attachments/";
+      const idx = record.photo_url.indexOf(marker);
+      if(idx >= 0){
+        const path = decodeURIComponent(record.photo_url.slice(idx + marker.length));
+        await sb.storage.from("attachments").remove([path]);
+      }
+    }
+  }catch(e){ /* 檔案清理失敗不影響資料庫紀錄 */ }
+  await loadInfraRecords();
+  render();
+}
+
 async function loadContacts(){
   const { data, error } = await sb.from("store_contacts").select("*");
   if(error){ alert("載入失敗：" + error.message); return; }
