@@ -209,7 +209,7 @@
     載入中…如果這段文字一直沒有消失，代表網頁程式無法執行，請截圖回報。
   </div>
 </div>
-<div class="version-badge">store v2026-09-03.2</div>
+<div class="version-badge">store v2026-09-03.4</div>
 
 <script>
 /* ============================================================
@@ -289,9 +289,9 @@ let state = {
     newStore: { code:"", name:"", regionId:"" }, storeFormError:"", lastCreatedStoreId:"",
     newAsset: { storeId:"", assetNo:"", name:"", majorCode:"", minorCode:"", brand:"", model:"", serialNo:"", source:"" },
     assetFormError:"", assetSessionCount:0, sessionAssets:[],
-    newInfra: { storeId:"", itemType:"", description:"", relatedArea:"", photoFile:null, photoPreviewUrl:null, latitude:null, longitude:null, compassHeading:null },
+    newInfra: { storeId:"", itemType:"", description:"", relatedArea:"", photoFiles:[], photoPreviews:[], latitude:null, longitude:null, compassHeading:null },
     infraFormError:"", infraSessionCount:0,
-    photoStoreId:"", photoAssetResults:[], photoSelectedAsset:null, photoAssetAttachments:[],
+    photoStoreId:"", photoAssetResults:[], photoSelectedAsset:null, photoAssetAttachments:[], photoNoPhotoOnly:false,
   },
 };
 
@@ -662,6 +662,7 @@ function renderSetupMenu(){
 function renderSetupAssetPhoto(){
   const s = state.setup;
   const storeOptions = s.allStores.map(st=>`<option value="${st.id}" ${s.photoStoreId===st.id?'selected':''}>${st.code?('['+st.code+'] '):''}${st.name}</option>`).join("");
+  const results = s.photoAssetResults||[];
   return `
   <header class="topbar">
     <span class="back" data-action="go-setup-menu">‹</span>
@@ -670,16 +671,25 @@ function renderSetupAssetPhoto(){
   <main>
     <label class="field-label">門市</label>
     <select id="photo-store-select"><option value="">請選擇門市…</option>${storeOptions}</select>
-    <label class="field-label">搜尋資產編號或名稱</label>
+    <label class="field-label">關鍵字篩選（選填，不填就顯示全部）</label>
     <div style="display:flex; gap:8px;">
       <input type="text" id="photo-asset-search" placeholder="例如：洗碗機、C012-23-...">
-      <button class="btn btn-outline" data-action="search-asset-for-photo" style="white-space:nowrap; padding:0 14px;">搜尋</button>
+      <button class="btn btn-outline" data-action="search-asset-for-photo" style="white-space:nowrap; padding:0 14px;">篩選</button>
     </div>
-    <div id="photo-asset-results" style="margin-top:14px;">
-      ${(s.photoAssetResults||[]).map(a=>`
-        <div class="card" style="padding:12px; cursor:pointer;" data-action="select-asset-for-photo" data-id="${a.id}" data-no="${a.asset_no}" data-name="${a.name}">
-          <strong style="font-size:14px;">${a.name}</strong>
-          <div style="font-family:monospace; font-size:12px; color:var(--ink-soft);">${a.asset_no}</div>
+    <label style="display:flex; align-items:center; gap:8px; font-size:13px; margin:10px 0 0;">
+      <input type="checkbox" id="photo-nophoto-only" style="width:auto;" ${s.photoNoPhotoOnly?'checked':''}>
+      只顯示還沒有照片的資產
+    </label>
+    <div id="photo-asset-results" style="margin-top:14px; max-height:340px; overflow-y:auto;">
+      ${!s.photoStoreId ? `<p style="font-size:13px; color:var(--ink-soft); text-align:center; padding:20px 0;">請先選擇門市</p>` :
+        results.length===0 ? `<p style="font-size:13px; color:var(--ink-soft); text-align:center; padding:20px 0;">${s.photoNoPhotoOnly ? '這家店的資產都已經有照片了 🎉' : '沒有符合的資產'}</p>` :
+        results.map(a=>`
+        <div class="card" style="padding:12px; cursor:pointer; display:flex; justify-content:space-between; align-items:center;" data-action="select-asset-for-photo" data-id="${a.id}" data-no="${a.asset_no}" data-name="${a.name}">
+          <div>
+            <strong style="font-size:14px;">${a.name}</strong>
+            <div style="font-family:monospace; font-size:12px; color:var(--ink-soft);">${a.asset_no}</div>
+          </div>
+          <span style="font-size:12px; ${a.hasPhoto ? 'color:var(--ok,#2F8F5B);' : 'color:var(--warn,#C4622D);'}">${a.hasPhoto ? '📷 有照片' : '尚無照片'}</span>
         </div>`).join("")}
     </div>
 
@@ -817,11 +827,14 @@ function renderSetupNewInfra(){
       ${s.newInfra.latitude ? `已取得座標：${s.newInfra.latitude.toFixed(6)}, ${s.newInfra.longitude.toFixed(6)}${s.newInfra.compassHeading!=null ? `，朝向約 ${Math.round(s.newInfra.compassHeading)}°` : '（此手機/瀏覽器無法取得指南針方向，略過不影響定位）'}` : '尚未取得定位，請按上面按鈕（第一次會請你允許存取位置）'}
     </p>
     ` : ""}
-    <label class="field-label">照片</label>
+    <label class="field-label">照片（可多張）</label>
     <div class="upload-grid" style="grid-template-columns:repeat(3,1fr); max-width:220px;">
-      <div class="upload-slot" data-action="upload-infra-photo">
-        ${s.newInfra.photoPreviewUrl ? `<img src="${s.newInfra.photoPreviewUrl}">` : "＋"}
-      </div>
+      ${(s.newInfra.photoPreviews||[]).map((url,i)=>`
+        <div class="upload-slot" style="position:relative;">
+          <img src="${url}">
+          <span data-action="remove-infra-photo" data-index="${i}" style="position:absolute; top:2px; right:2px; background:rgba(193,63,63,.9); color:#fff; border-radius:5px; width:18px; height:18px; line-height:18px; text-align:center; font-size:11px; cursor:pointer;">✕</span>
+        </div>`).join("")}
+      <div class="upload-slot" data-action="upload-infra-photo">＋</div>
     </div>
     ${s.infraFormError ? `<div class="error-msg">${s.infraFormError}</div>` : ""}
   </main>
@@ -895,6 +908,10 @@ function bindEvents(){
   if(suInfraStore) suInfraStore.addEventListener("change", ()=>{ state.setup.newInfra.storeId = suInfraStore.value; });
   const suInfraType = document.getElementById("su-infra-type");
   if(suInfraType) suInfraType.addEventListener("change", ()=>{ state.setup.newInfra.itemType = suInfraType.value; });
+  const photoStoreSelect = document.getElementById("photo-store-select");
+  if(photoStoreSelect) photoStoreSelect.addEventListener("change", async ()=>{ await searchAssetForPhoto(); });
+  const photoNoPhotoOnly = document.getElementById("photo-nophoto-only");
+  if(photoNoPhotoOnly) photoNoPhotoOnly.addEventListener("change", async ()=>{ await searchAssetForPhoto(); });
 }
 
 /* ============================================================
@@ -908,12 +925,27 @@ document.body.appendChild(fileInput);
 let fileTarget = null; // { mode:'new-report'|'case-upload', index, caseId, category, markKey }
 
 fileInput.addEventListener("change", async (e)=>{
-  const file = e.target.files[0];
-  fileInput.value = "";
+  const files = Array.from(e.target.files || []);
   const target = fileTarget;
+  fileInput.value = "";
   fileTarget = null;
-  if(!file || !target) return;
+  if(files.length === 0 || !target) return;
 
+  // 門市基礎設施：支援一次選取多張照片
+  if(target.mode === "infra-photo"){
+    for(const f of files){
+      if(f.size > 50 * 1024 * 1024){
+        alert(`${f.name} 檔案過大（超過 50MB），已略過`);
+        continue;
+      }
+      state.setup.newInfra.photoFiles.push(f);
+      state.setup.newInfra.photoPreviews.push(URL.createObjectURL(f));
+    }
+    render();
+    return;
+  }
+
+  const file = files[0];
   if(file.size > 50 * 1024 * 1024){
     alert("檔案過大（超過 50MB），請重新拍攝或選擇較小的檔案");
     return;
@@ -942,10 +974,6 @@ fileInput.addEventListener("change", async (e)=>{
     }catch(err){
       alert("上傳失敗：" + err.message);
     }
-  }else if(target.mode === "infra-photo"){
-    state.setup.newInfra.photoFile = file;
-    state.setup.newInfra.photoPreviewUrl = file.type.startsWith("image") ? URL.createObjectURL(file) : null;
-    render();
   }else if(target.mode === "asset-photo"){
     try{
       const ext = (file.name.split(".").pop() || "dat").toLowerCase();
@@ -1026,14 +1054,17 @@ async function onAction(e){
   else if(action === "confirm-result"){ await confirmCaseResult(el.dataset.value); }
   else if(action === "upload-slot"){
     fileTarget = { mode:"new-report", index: Number(el.dataset.index) };
+    fileInput.multiple = false;
     fileInput.click();
   }
   else if(action === "upload-supplement"){
     fileTarget = { mode:"case-upload", index: Number(el.dataset.index), caseId: state.currentCase.id, category:"other", markKey:"supplement" };
+    fileInput.multiple = false;
     fileInput.click();
   }
   else if(action === "upload-after"){
     fileTarget = { mode:"case-upload", index: Number(el.dataset.index), caseId: state.currentCase.id, category:"after_repair_photo", markKey:"after" };
+    fileInput.multiple = false;
     fileInput.click();
   }
   else if(action === "go-setup-menu"){ state.view = "setup-menu"; render(); }
@@ -1073,7 +1104,15 @@ async function onAction(e){
   else if(action === "submit-new-infra"){ await submitNewInfra(); }
   else if(action === "upload-infra-photo"){
     fileTarget = { mode:"infra-photo" };
+    fileInput.accept = "image/*";
+    fileInput.multiple = true;
     fileInput.click();
+  }
+  else if(action === "remove-infra-photo"){
+    const idx = parseInt(el.dataset.index, 10);
+    state.setup.newInfra.photoFiles.splice(idx, 1);
+    state.setup.newInfra.photoPreviews.splice(idx, 1);
+    render();
   }
   else if(action === "export-session-assets"){ exportSessionAssets(); }
 }
@@ -1448,15 +1487,28 @@ async function captureInfraLocation(){
 async function searchAssetForPhoto(){
   const storeId = document.getElementById("photo-store-select")?.value;
   const q = document.getElementById("photo-asset-search")?.value.trim();
+  const noPhotoOnly = document.getElementById("photo-nophoto-only")?.checked || false;
   state.setup.photoStoreId = storeId || "";
-  if(!q){ alert("請輸入搜尋關鍵字"); return; }
-  let query = storeId
-    ? sb.from("assets").select("id, asset_no, name").eq("store_id", storeId).or(`name.ilike.%${q}%,asset_no.ilike.%${q}%`).limit(20)
-    : sb.from("assets").select("id, asset_no, name").or(`name.ilike.%${q}%,asset_no.ilike.%${q}%`).limit(20);
-  const { data, error } = await query;
-  if(error){ alert("搜尋失敗：" + error.message); return; }
-  state.setup.photoAssetResults = data || [];
+  state.setup.photoNoPhotoOnly = noPhotoOnly;
   state.setup.photoSelectedAsset = null;
+  if(!storeId){ state.setup.photoAssetResults = []; render(); return; }
+
+  let query = sb.from("assets").select("id, asset_no, name").eq("store_id", storeId).order("asset_no").limit(300);
+  if(q) query = query.or(`name.ilike.%${q}%,asset_no.ilike.%${q}%`);
+  const { data, error } = await query;
+  if(error){ alert("載入失敗：" + error.message); return; }
+
+  const assets = data || [];
+  const ids = assets.map(a=>a.id);
+  let photoIds = new Set();
+  if(ids.length){
+    const { data: photoRows } = await sb.from("attachments").select("related_id").eq("related_type","asset").in("related_id", ids);
+    photoIds = new Set((photoRows||[]).map(p=>p.related_id));
+  }
+  let results = assets.map(a=>({ ...a, hasPhoto: photoIds.has(a.id) }));
+  if(noPhotoOnly) results = results.filter(a=>!a.hasPhoto);
+
+  state.setup.photoAssetResults = results;
   render();
 }
 
@@ -1470,6 +1522,7 @@ function triggerSetupAssetPhotoUpload(){
   if(!state.setup.photoSelectedAsset) return;
   fileTarget = { mode: "asset-photo", assetId: state.setup.photoSelectedAsset.id };
   fileInput.accept = "image/*";
+  fileInput.multiple = false;
   fileInput.click();
 }
 
@@ -1565,38 +1618,39 @@ async function submitNewInfra(){
   const description = document.getElementById("su-infra-desc").value.trim();
   if(!storeId || !itemType){ su.infraFormError = "請選擇門市與項目類型"; render(); return; }
 
-  let photoUrl = null;
-  if(su.newInfra.photoFile){
-    try{
-      const ext = (su.newInfra.photoFile.name.split(".").pop() || "jpg").toLowerCase();
-      const path = `store-infra/${storeId}/${Date.now()}-${Math.random().toString(36).slice(2,7)}.${ext}`;
-      const { error: upErr } = await sb.storage.from("attachments").upload(path, su.newInfra.photoFile);
-      if(upErr) throw upErr;
-      const { data: urlData } = sb.storage.from("attachments").getPublicUrl(path);
-      photoUrl = urlData.publicUrl;
-    }catch(err){
-      su.infraFormError = "照片上傳失敗：" + err.message;
-      render(); return;
-    }
-  }
-
   const payload = {
     store_id: storeId, item_type: itemType,
     description: description || null,
     related_area: document.getElementById("su-infra-area").value || null,
-    photo_url: photoUrl,
     latitude: su.newInfra.latitude ?? null,
     longitude: su.newInfra.longitude ?? null,
     compass_heading: su.newInfra.compassHeading ?? null,
     created_by: state.profile?.id || null
   };
 
-  const { error } = await sb.from("store_infrastructure").insert(payload);
+  const { data: inserted, error } = await sb.from("store_infrastructure").insert(payload).select().single();
   if(error){ su.infraFormError = "新增失敗：" + error.message; render(); return; }
-
   su.infraFormError = "";
+
+  // 逐一上傳選好的照片（可多張），任何一張失敗不影響紀錄本身已建立成功
+  for(const file of su.newInfra.photoFiles){
+    try{
+      const ext = (file.name.split(".").pop() || "jpg").toLowerCase();
+      const path = `store-infra/${storeId}/${Date.now()}-${Math.random().toString(36).slice(2,7)}.${ext}`;
+      const { error: upErr } = await sb.storage.from("attachments").upload(path, file);
+      if(upErr) throw upErr;
+      const { data: urlData } = sb.storage.from("attachments").getPublicUrl(path);
+      await sb.from("attachments").insert({
+        related_type: "infrastructure", related_id: inserted.id,
+        category: "infra_photo", file_path: urlData.publicUrl
+      });
+    }catch(err){
+      su.infraFormError = `紀錄已建立，但有照片上傳失敗：${err.message}`;
+    }
+  }
+
   su.infraSessionCount += 1;
-  su.newInfra = { storeId, itemType:"", description:"", relatedArea:"", photoFile:null, photoPreviewUrl:null, latitude:null, longitude:null, compassHeading:null };
+  su.newInfra = { storeId, itemType:"", description:"", relatedArea:"", photoFiles:[], photoPreviews:[], latitude:null, longitude:null, compassHeading:null };
   render();
 }
 
