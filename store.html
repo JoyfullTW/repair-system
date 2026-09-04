@@ -194,6 +194,12 @@
     font-family:"JetBrains Mono",monospace; font-size:10px; letter-spacing:.03em;
     color:var(--ink-soft); background:var(--surface); border:1px solid var(--border);
     padding:2px 7px; border-radius:5px; opacity:.75;
+  }  .attach-grid{ display:grid; grid-template-columns:repeat(auto-fill, minmax(100px,1fr)); gap:10px; margin-top:8px; }
+  .attach-item{ border:1px solid var(--border); border-radius:8px; overflow:hidden; background:#F7FAFC; }
+  .attach-item img{ width:100%; height:80px; object-fit:cover; display:block; }
+  .attach-upload-btn{
+    display:flex; align-items:center; justify-content:center; min-height:80px;
+    border:1.5px dashed var(--border); border-radius:8px; color:var(--ink-soft); font-size:13px; cursor:pointer;
   }
 </style>
 </head>
@@ -203,7 +209,7 @@
     載入中…如果這段文字一直沒有消失，代表網頁程式無法執行，請截圖回報。
   </div>
 </div>
-<div class="version-badge">store v2026-09-01.2</div>
+<div class="version-badge">store v2026-09-03.1</div>
 
 <script>
 /* ============================================================
@@ -279,12 +285,13 @@ let state = {
   caseUploadMarks: {},
   setup: {
     view: "menu",
-    regions: [], assetMajorCategories: [], allStores: [],
+    regions: [], assetMajorCategories: [], assetMinorCategories: [], allStores: [],
     newStore: { code:"", name:"", regionId:"" }, storeFormError:"", lastCreatedStoreId:"",
     newAsset: { storeId:"", assetNo:"", name:"", majorCode:"", minorCode:"", brand:"", model:"", serialNo:"", source:"" },
     assetFormError:"", assetSessionCount:0, sessionAssets:[],
     newInfra: { storeId:"", itemType:"", description:"", relatedArea:"", photoFile:null, photoPreviewUrl:null },
     infraFormError:"", infraSessionCount:0,
+    photoStoreId:"", photoAssetResults:[], photoSelectedAsset:null, photoAssetAttachments:[],
   },
 };
 
@@ -307,6 +314,7 @@ function render(){
   else if(state.view === "setup-new-store") app.innerHTML = renderSetupNewStore();
   else if(state.view === "setup-new-asset") app.innerHTML = renderSetupNewAsset();
   else if(state.view === "setup-new-infra") app.innerHTML = renderSetupNewInfra();
+  else if(state.view === "setup-asset-photo") app.innerHTML = renderSetupAssetPhoto();
   bindEvents();
 }
 
@@ -642,7 +650,55 @@ function renderSetupMenu(){
         <div class="ico">🔌</div>
         <div class="txt"><strong>門市基礎設施</strong><span>配電、總電源、冷氣型式等拍照存檔</span></div>
       </div>
+      <div class="cta" data-action="go-setup-asset-photo">
+        <div class="ico">📷</div>
+        <div class="txt"><strong>資產補照片</strong><span>查詢既有資產，現場直接拍照上傳</span></div>
+      </div>
     </div>
+  </main>`;
+}
+
+/* ---------------- 新門市建檔：資產補照片 ---------------- */
+function renderSetupAssetPhoto(){
+  const s = state.setup;
+  const storeOptions = s.allStores.map(st=>`<option value="${st.id}" ${s.photoStoreId===st.id?'selected':''}>${st.code?('['+st.code+'] '):''}${st.name}</option>`).join("");
+  return `
+  <header class="topbar">
+    <span class="back" data-action="go-setup-menu">‹</span>
+    <h1>資產補照片</h1>
+  </header>
+  <main>
+    <label class="field-label">門市</label>
+    <select id="photo-store-select"><option value="">請選擇門市…</option>${storeOptions}</select>
+    <label class="field-label">搜尋資產編號或名稱</label>
+    <div style="display:flex; gap:8px;">
+      <input type="text" id="photo-asset-search" placeholder="例如：洗碗機、C012-23-...">
+      <button class="btn btn-outline" data-action="search-asset-for-photo" style="white-space:nowrap; padding:0 14px;">搜尋</button>
+    </div>
+    <div id="photo-asset-results" style="margin-top:14px;">
+      ${(s.photoAssetResults||[]).map(a=>`
+        <div class="card" style="padding:12px; cursor:pointer;" data-action="select-asset-for-photo" data-id="${a.id}" data-no="${a.asset_no}" data-name="${a.name}">
+          <strong style="font-size:14px;">${a.name}</strong>
+          <div style="font-family:monospace; font-size:12px; color:var(--ink-soft);">${a.asset_no}</div>
+        </div>`).join("")}
+    </div>
+
+    ${s.photoSelectedAsset ? `
+    <div class="card" style="margin-top:16px; border-color:var(--steel, var(--primary));">
+      <div style="font-weight:700; margin-bottom:4px;">${s.photoSelectedAsset.name}</div>
+      <div style="font-family:monospace; font-size:12px; color:var(--ink-soft); margin-bottom:12px;">${s.photoSelectedAsset.asset_no}</div>
+      <div class="attach-grid">
+        ${(s.photoAssetAttachments||[]).map(p=>`
+          <div class="attach-item" style="position:relative;">
+            <a href="${p.file_path}" target="_blank" style="text-decoration:none; color:inherit; display:block;">
+              <img src="${p.file_path}" onerror="this.style.display='none'">
+            </a>
+            <button type="button" data-action="delete-setup-asset-photo" data-id="${p.id}"
+              style="position:absolute; top:4px; right:4px; background:rgba(193,63,63,.9); color:#fff; border:none; border-radius:5px; width:22px; height:22px; line-height:1;">✕</button>
+          </div>`).join("")}
+        <div class="attach-upload-btn" data-action="upload-setup-asset-photo">＋ 拍照上傳</div>
+      </div>
+    </div>` : ""}
   </main>`;
 }
 
@@ -688,14 +744,27 @@ function renderSetupNewAsset(){
       </div>` : ""}
     <label class="field-label">所在門市</label>
     <select id="su-asset-store"><option value="">請選擇門市…</option>${storeOptions}</select>
-    <label class="field-label">資產編號（選填，可依規則自訂）</label>
-    <input type="text" id="su-asset-no" value="${s.newAsset.assetNo}" placeholder="例如：C040-26-001-0001">
     <label class="field-label">資產名稱</label>
-    <input type="text" id="su-asset-name" value="${s.newAsset.name}" placeholder="例如：十五人電飯鍋">
-    <div class="grid-2-mobile" style="display:flex; gap:10px;">
-      <div style="flex:1;"><label class="field-label">大類</label><select id="su-asset-major"><option value="">—</option>${majorOptions}</select></div>
-      <div style="flex:1;"><label class="field-label">中類代碼</label><input type="text" id="su-asset-minor" value="${s.newAsset.minorCode}" placeholder="例如：001"></div>
+    <div style="display:flex; gap:8px;">
+      <input type="text" id="su-asset-name" value="${s.newAsset.name}" placeholder="例如：十五人電飯鍋" style="flex:1;">
+      <button type="button" class="btn btn-outline" data-action="suggest-asset-category-mobile" style="white-space:nowrap; padding:0 12px;">🔍 分類</button>
     </div>
+    <p id="su-asset-category-hint" style="font-size:12px; color:var(--ink-soft); margin:4px 0 0;"></p>
+    <div class="grid-2-mobile" style="display:flex; gap:10px; margin-top:12px;">
+      <div style="flex:1;"><label class="field-label">大類</label><select id="su-asset-major"><option value="">—</option>${majorOptions}</select></div>
+      <div style="flex:1;"><label class="field-label">中類</label>
+        <select id="su-asset-minor">
+          <option value="">— 先選大類 —</option>
+          ${s.assetMinorCategories.filter(m=>m.major_code===s.newAsset.majorCode).map(m=>`<option value="${m.code}" ${s.newAsset.minorCode===m.code?'selected':''}>${m.code} ${m.name}</option>`).join("")}
+        </select>
+      </div>
+    </div>
+    <label class="field-label">資產編號</label>
+    <div style="display:flex; gap:8px;">
+      <input type="text" id="su-asset-no" value="${s.newAsset.assetNo}" placeholder="例如：C040-26-001-0001" style="flex:1;">
+      <button type="button" class="btn btn-outline" data-action="suggest-asset-no-mobile" style="white-space:nowrap; padding:0 12px;">🔢 編號</button>
+    </div>
+    <p id="su-asset-no-hint" style="font-size:12px; color:var(--ink-soft); margin:4px 0 0;">名稱打好先按「🔍 分類」，大類/中類選好後再按「🔢 編號」，會自動查目前這個組合最大用到幾號。</p>
     <label class="field-label">品牌</label>
     <input type="text" id="su-asset-brand" value="${s.newAsset.brand}">
     <label class="field-label">型號</label>
@@ -801,7 +870,16 @@ function bindEvents(){
   const suAssetStore = document.getElementById("su-asset-store");
   if(suAssetStore) suAssetStore.addEventListener("change", ()=>{ state.setup.newAsset.storeId = suAssetStore.value; });
   const suAssetMajor = document.getElementById("su-asset-major");
-  if(suAssetMajor) suAssetMajor.addEventListener("change", ()=>{ state.setup.newAsset.majorCode = suAssetMajor.value; });
+  if(suAssetMajor) suAssetMajor.addEventListener("change", ()=>{
+    state.setup.newAsset.majorCode = suAssetMajor.value;
+    const minorSel = document.getElementById("su-asset-minor");
+    if(minorSel){
+      const opts = state.setup.assetMinorCategories.filter(m=> m.major_code === suAssetMajor.value);
+      minorSel.innerHTML = `<option value="">${opts.length ? '— 請選擇 —' : '— 先選大類 —'}</option>` +
+        opts.map(m=>`<option value="${m.code}">${m.code} ${m.name}</option>`).join("");
+      state.setup.newAsset.minorCode = "";
+    }
+  });
   const suAssetSource = document.getElementById("su-asset-source");
   if(suAssetSource) suAssetSource.addEventListener("change", ()=>{ state.setup.newAsset.source = suAssetSource.value; });
   const suInfraStore = document.getElementById("su-infra-store");
@@ -859,6 +937,22 @@ fileInput.addEventListener("change", async (e)=>{
     state.setup.newInfra.photoFile = file;
     state.setup.newInfra.photoPreviewUrl = file.type.startsWith("image") ? URL.createObjectURL(file) : null;
     render();
+  }else if(target.mode === "asset-photo"){
+    try{
+      const ext = (file.name.split(".").pop() || "dat").toLowerCase();
+      const path = `asset-photos/${target.assetId}/${Date.now()}-${Math.random().toString(36).slice(2,7)}.${ext}`;
+      const { error: upErr } = await sb.storage.from("attachments").upload(path, file);
+      if(upErr) throw upErr;
+      const { data: urlData } = sb.storage.from("attachments").getPublicUrl(path);
+      const { error: insErr } = await sb.from("attachments").insert({
+        related_type: "asset", related_id: target.assetId, category: "asset_photo",
+        file_path: urlData.publicUrl
+      });
+      if(insErr) throw insErr;
+      await loadSetupAssetAttachments(target.assetId);
+    }catch(err){
+      alert("上傳失敗：" + err.message);
+    }
   }
 });
 
@@ -942,14 +1036,30 @@ async function onAction(e){
   else if(action === "go-setup-new-asset"){
     await loadAllStoresForSetup();
     await loadAssetMajorCategoriesForSetup();
+    await loadAssetMinorCategoriesForSetup();
     state.view = "setup-new-asset"; render();
   }
   else if(action === "go-setup-new-infra"){
     await loadAllStoresForSetup();
     state.view = "setup-new-infra"; render();
   }
+  else if(action === "go-setup-asset-photo"){
+    await loadAllStoresForSetup();
+    state.setup.photoStoreId = ""; state.setup.photoAssetResults = [];
+    state.setup.photoSelectedAsset = null; state.setup.photoAssetAttachments = [];
+    state.view = "setup-asset-photo"; render();
+  }
+  else if(action === "search-asset-for-photo"){ await searchAssetForPhoto(); }
+  else if(action === "select-asset-for-photo"){
+    state.setup.photoSelectedAsset = { id: el.dataset.id, asset_no: el.dataset.no, name: el.dataset.name };
+    await loadSetupAssetAttachments(el.dataset.id);
+  }
+  else if(action === "upload-setup-asset-photo"){ triggerSetupAssetPhotoUpload(); }
+  else if(action === "delete-setup-asset-photo"){ await deleteSetupAssetPhoto(el.dataset.id); }
   else if(action === "submit-new-store"){ await submitNewStore(); }
   else if(action === "submit-new-asset"){ await submitNewAsset(); }
+  else if(action === "suggest-asset-category-mobile"){ suggestAssetCategoryMobile(); }
+  else if(action === "suggest-asset-no-mobile"){ await suggestAssetNoMobile(); }
   else if(action === "submit-new-infra"){ await submitNewInfra(); }
   else if(action === "upload-infra-photo"){
     fileTarget = { mode:"infra-photo" };
@@ -1163,6 +1273,11 @@ async function loadAssetMajorCategoriesForSetup(){
   state.setup.assetMajorCategories = data || [];
 }
 
+async function loadAssetMinorCategoriesForSetup(){
+  const { data } = await sb.from("asset_minor_categories").select("*").order("major_code").order("code");
+  state.setup.assetMinorCategories = data || [];
+}
+
 async function submitNewStore(){
   const su = state.setup;
   const code = document.getElementById("su-store-code").value.trim();
@@ -1179,6 +1294,136 @@ async function submitNewStore(){
   su.newAsset.storeId = data.id; // 方便接下來直接去新增資產時預選這間店
   su.newInfra.storeId = data.id;
   render();
+}
+
+// 依資產名稱關鍵字建議「設備大類＋中類」，只是關鍵字比對，不是真正AI辨識，僅供參考
+const CATEGORY_KEYWORD_MAP = [
+  [["冰箱","冷凍庫","冷凍櫃","冷藏庫","冷藏櫃"], "C", "004"],
+  [["工作台冰箱"], "C", "005"],
+  [["洗碗機"], "C", "003"],
+  [["電飯鍋","飯鍋","保溫鍋","湯鍋","保溫飯鍋"], "C", "001"],
+  [["咖啡機","冰沙機","茶飲機","飲水機","爆米花機","霜淇淋機","可樂機","茶包台","冰塊槽","製冰機"], "C", "001"],
+  [["味噌","油鍋","煎台","煎板","微波爐","煮飯鍋","烤箱","六口爐","四口爐","瓦斯爐","電磁爐","煮麵機","切絲機","磅秤","水槽","油炸機","抽風機","排煙"], "C", "002"],
+  [["POS","出單機","刷卡機","點鈔機","標籤機","LinePay","LINE PAY","服務鈴","公播","叫號","取號","金庫"], "G", "001"],
+  [["座椅","沙發","桌","椅"], "G", "002"],
+  [["滅火器","消防警報","警報發信器"], "G", "004"],
+  [["招牌","看板"], "G", "005"],
+  [["監視","監視系統","監視器"], "G", "006"],
+  [["電腦主機","主機"], "F", "001"],
+  [["螢幕"], "F", "002"],
+  [["筆電","筆記型電腦","平板"], "F", "003"],
+  [["印表機"], "F", "005"],
+  [["掃瞄器","掃描器"], "F", "006"],
+  [["硬碟"], "F", "007"],
+  [["電話機","電話","子母機"], "F", "008"],
+  [["WIFI","Wi-Fi","無線分享器","分享器","數據機","路由器"], "F", "009"],
+  [["碎紙機"], "F", "010"],
+  [["護貝機"], "F", "011"],
+  [["變壓器","電閘","電箱","總開關","接電盤","充電區"], "A", "001"],
+  [["濾心","熱水器","排煙口","排水","水管"], "A", "002"],
+  [["消防設備工事"], "A", "006"],
+  [["照明","燈"], "A", "007"],
+  [["招牌工程","標示"], "A", "008"],
+  [["裝修"], "A", "004"],
+];
+
+function suggestAssetCategoryMobile(){
+  const nameInput = document.getElementById("su-asset-name");
+  const name = (nameInput.value || "").trim();
+  const hint = document.getElementById("su-asset-category-hint");
+  if(!name){ alert("請先輸入資產名稱"); return; }
+
+  let match = null;
+  for(const [keywords, major, minor] of CATEGORY_KEYWORD_MAP){
+    if(keywords.some(kw=> name.includes(kw))){ match = { major, minor }; break; }
+  }
+  if(!match){
+    hint.textContent = "沒有比對到符合的關鍵字，請自己手動選擇大類與中類。";
+    hint.style.color = "var(--warn, #C4622D)";
+    return;
+  }
+
+  state.setup.newAsset.majorCode = match.major;
+  const majorSel = document.getElementById("su-asset-major");
+  if(majorSel) majorSel.value = match.major;
+
+  const minorSel = document.getElementById("su-asset-minor");
+  if(minorSel){
+    const opts = state.setup.assetMinorCategories.filter(m=> m.major_code === match.major);
+    minorSel.innerHTML = `<option value="">— 請選擇 —</option>` + opts.map(m=>`<option value="${m.code}">${m.code} ${m.name}</option>`).join("");
+    minorSel.value = match.minor;
+  }
+  state.setup.newAsset.minorCode = match.minor;
+
+  const majorCat = state.setup.assetMajorCategories.find(m=>m.code===match.major);
+  const minorCat = state.setup.assetMinorCategories.find(m=> m.major_code===match.major && m.code===match.minor);
+  hint.textContent = `建議分類：「${match.major} ${majorCat?majorCat.name:''}」→「${match.minor} ${minorCat?minorCat.name:''}」，僅供參考，請確認是否正確。`;
+  hint.style.color = "var(--ok, #2F8F5B)";
+}
+
+async function suggestAssetNoMobile(){
+  const major = document.getElementById("su-asset-major").value;
+  const minor = document.getElementById("su-asset-minor").value;
+  const storeId = document.getElementById("su-asset-store").value;
+  const store = state.setup.allStores.find(s=>s.id===storeId);
+  const hint = document.getElementById("su-asset-no-hint");
+
+  if(!major || !minor || !store){
+    alert("請先選好「所在門市」「大類」「中類」，再按建議編號");
+    return;
+  }
+  const yy = String(new Date().getFullYear()).slice(2,4);
+  const prefix = `${major}${store.code}-${yy}-${minor}-`;
+  const { data, error } = await sb.from("assets").select("asset_no").ilike("asset_no", `${prefix}%`);
+  if(error){ alert("查詢失敗：" + error.message); return; }
+  let maxSeq = 0;
+  (data||[]).forEach(row=>{
+    const m = (row.asset_no||"").match(/-(\d{4})$/);
+    if(m) maxSeq = Math.max(maxSeq, parseInt(m[1],10));
+  });
+  const nextSeq = String(maxSeq+1).padStart(4,'0');
+  const suggested = `${prefix}${nextSeq}`;
+  document.getElementById("su-asset-no").value = suggested;
+  state.setup.newAsset.assetNo = suggested;
+  hint.textContent = maxSeq
+    ? `目前這個組合最大用到 ${prefix}${String(maxSeq).padStart(4,'0')}，已自動帶入建議編號，可以手動修改。`
+    : `這個組合目前還沒有任何資產，已自動帶入第一號。`;
+  hint.style.color = "var(--ok, #2F8F5B)";
+}
+
+async function searchAssetForPhoto(){
+  const storeId = document.getElementById("photo-store-select")?.value;
+  const q = document.getElementById("photo-asset-search")?.value.trim();
+  state.setup.photoStoreId = storeId || "";
+  if(!q){ alert("請輸入搜尋關鍵字"); return; }
+  let query = storeId
+    ? sb.from("assets").select("id, asset_no, name").eq("store_id", storeId).or(`name.ilike.%${q}%,asset_no.ilike.%${q}%`).limit(20)
+    : sb.from("assets").select("id, asset_no, name").or(`name.ilike.%${q}%,asset_no.ilike.%${q}%`).limit(20);
+  const { data, error } = await query;
+  if(error){ alert("搜尋失敗：" + error.message); return; }
+  state.setup.photoAssetResults = data || [];
+  state.setup.photoSelectedAsset = null;
+  render();
+}
+
+async function loadSetupAssetAttachments(assetId){
+  const { data } = await sb.from("attachments").select("*").eq("related_type","asset").eq("related_id", assetId).order("uploaded_at",{ascending:false});
+  state.setup.photoAssetAttachments = data || [];
+  render();
+}
+
+function triggerSetupAssetPhotoUpload(){
+  if(!state.setup.photoSelectedAsset) return;
+  fileTarget = { mode: "asset-photo", assetId: state.setup.photoSelectedAsset.id };
+  fileInput.accept = "image/*";
+  fileInput.click();
+}
+
+async function deleteSetupAssetPhoto(attachmentId){
+  if(!confirm("確定要刪除這張照片嗎？")) return;
+  const { error } = await sb.from("attachments").delete().eq("id", attachmentId);
+  if(error){ alert("刪除失敗：" + error.message); return; }
+  if(state.setup.photoSelectedAsset) await loadSetupAssetAttachments(state.setup.photoSelectedAsset.id);
 }
 
 async function submitNewAsset(){
