@@ -209,7 +209,7 @@
     載入中…如果這段文字一直沒有消失，代表網頁程式無法執行，請截圖回報。
   </div>
 </div>
-<div class="version-badge">store build 12</div>
+<div class="version-badge">store build 13</div>
 
 <script>
 /* ============================================================
@@ -951,6 +951,7 @@ fileInput.addEventListener("change", async (e)=>{
 
   // 資產補照片：支援一次選取多張照片，逐張直接上傳
   if(target.mode === "asset-photo-multi"){
+    let successCount = 0;
     for(const f of files){
       if(f.size > 50 * 1024 * 1024){
         alert(`${f.name} 檔案過大（超過 50MB），已略過`);
@@ -967,11 +968,13 @@ fileInput.addEventListener("change", async (e)=>{
           file_path: urlData.publicUrl
         });
         if(insErr) throw insErr;
+        successCount++;
       }catch(err){
         alert(`${f.name} 上傳失敗：${err.message}`);
       }
     }
     await loadSetupAssetAttachments(target.assetId);
+    if(successCount > 0) alert(`✅ 已儲存成功，共 ${successCount} 張照片已存入資料庫`);
     return;
   }
 
