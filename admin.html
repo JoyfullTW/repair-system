@@ -161,7 +161,7 @@
 </head>
 <body>
 <div id="app"></div>
-<div class="version-badge">admin build 21</div>
+<div class="version-badge">admin build 22</div>
 
 <script>
 /* ============================================================
@@ -223,7 +223,7 @@ let state = {
   currentAsset: null, assetFormError: "", assetLogs: [], assetAttachments: [],
   assignmentRules: [], assignmentFilters: { storeId:"", confirmStatus:"" }, assignmentFormError: "", showCopyRulesPanel: false,
   contacts: [], editingStoreId: null, editingContactId: null, generalCategories: [], editingVendorId: null, vendorFilterQ: "",
-  infraFilters: { storeId: "" }, infraRecords: [], infraPhotos: {},
+  infraFilters: { storeId: "" }, infraRecords: [], infraPhotos: {}, sidebarBadges: { newCases: 0, pendingAccounts: 0 },
   dashboardStats: null,
   caseFilters: { status:"", storeId:"", urgency:"", q:"" },
   cases: [],
@@ -277,21 +277,26 @@ function renderLogin(){
 
 /* ---------------- 側邊欄 ---------------- */
 function renderSidebar(){
+  const badges = state.sidebarBadges || {};
   const items = [
     { key:"dashboard", label:"Dashboard", ico:"📊" },
-    { key:"case-list", label:"案件列表", ico:"📋" },
+    { key:"case-list", label:"案件列表", ico:"📋", badge: badges.newCases },
     { key:"assets", label:"資產管理", ico:"🧊" },
     { key:"stores", label:"門市管理", ico:"🏬" },
     { key:"contacts", label:"通訊錄", ico:"📇" },
     { key:"infrastructure", label:"門市基礎設施", ico:"🔌" },
-    { key:"accounts", label:"帳號管理", ico:"👤" },
+    { key:"accounts", label:"帳號管理", ico:"👤", badge: badges.pendingAccounts },
     { key:"vendors", label:"廠商管理", ico:"🧰" },
     { key:"assignment-rules", label:"廠商指派規則", ico:"🗂️" },
   ];
   return `
   <div class="sidebar">
     <div class="brand">🔧 總務報修</div>
-    ${items.map(i=>`<div class="nav-item" data-action="nav" data-view="${i.key}" data-active="${state.view===i.key}">${i.ico} ${i.label}</div>`).join("")}
+    ${items.map(i=>`
+      <div class="nav-item" data-action="nav" data-view="${i.key}" data-active="${state.view===i.key}" style="display:flex; align-items:center; justify-content:space-between;">
+        <span>${i.ico} ${i.label}</span>
+        ${i.badge ? `<span style="background:var(--err,#C13F3F); color:#fff; font-size:11px; font-weight:700; border-radius:10px; min-width:18px; height:18px; display:inline-flex; align-items:center; justify-content:center; padding:0 5px;">${i.badge > 99 ? '99+' : i.badge}</span>` : ""}
+      </div>`).join("")}
     <div class="spacer"></div>
     <div class="who">
       <b>${state.profile?.display_name || ""}</b>
@@ -1216,7 +1221,27 @@ async function afterLogin(){
   await loadStores();
   await loadRegions();
   await loadVendors();
+  await loadSidebarBadgeCounts();
   await goTo("dashboard");
+}
+
+async function loadSidebarBadgeCounts(){
+  const p = state.profile;
+  if(!p) return;
+  try{
+    const { count: newCases } = await scopedCaseQuery(
+      sb.from("cases").select("id", { count:"exact", head:true }).eq("status","new")
+    );
+    state.sidebarBadges.newCases = newCases || 0;
+
+    if(["general_affairs","admin"].includes(p.role)){
+      const { count: pendingAccounts } = await sb.from("users_profile").select("id", { count:"exact", head:true }).eq("status","disabled");
+      state.sidebarBadges.pendingAccounts = pendingAccounts || 0;
+    } else {
+      state.sidebarBadges.pendingAccounts = 0;
+    }
+  }catch(e){ /* 提醒數字載入失敗不影響其他功能 */ }
+  render();
 }
 
 /* ============================================================
@@ -1716,6 +1741,7 @@ async function goTo(view){
   else if(view === "accounts"){ await loadRegions(); await loadAccounts(); }
   else if(view === "vendors") await loadVendors();
   else if(view === "assignment-rules") await loadVendors();
+  await loadSidebarBadgeCounts();
   render();
 }
 
@@ -1946,6 +1972,8 @@ async function saveAccount(id){
   const { error } = await sb.from("users_profile").update({ role, store_id: storeId, region_id: regionId, status }).eq("id", id);
   if(error){ alert("儲存失敗：" + error.message); return; }
   await loadAccounts();
+  await loadSidebarBadgeCounts();
+  alert("✅ 已儲存成功");
   render();
 }
 
