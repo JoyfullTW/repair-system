@@ -161,7 +161,7 @@
 </head>
 <body>
 <div id="app"></div>
-<div class="version-badge">admin build 22</div>
+<div class="version-badge">admin build 24</div>
 
 <script>
 /* ============================================================
@@ -466,6 +466,7 @@ function renderCaseDetail(){
         <input type="number" id="edit-store-pay" value="${c.store_pay_amount||''}">
 
         <label class="field-label">廠商${state.caseVendorAutoFilled ? ' <span style="color:var(--ok); text-transform:none; font-weight:400;">（系統已自動帶入建議廠商，請確認後按下方儲存）</span>' : (bestMatchList.length ? ' <span style="color:var(--ok); text-transform:none; font-weight:400;">（已依設備名稱找到最相關廠商，見選單最上方）</span>' : '')}</label>
+        <input type="text" id="vendor-search-filter" placeholder="🔍 輸入關鍵字篩選廠商…" style="margin-bottom:8px;">
         <div style="display:flex; gap:8px;">
           <select id="edit-vendor" style="flex:1;"><option value="">— 未指定 —</option>${vendorOptions}</select>
           <button class="btn btn-outline btn-sm" data-action="quick-add-vendor">＋臨時廠商</button>
@@ -1128,6 +1129,41 @@ function bindEvents(){
     if(!hint) return;
     const v = state.vendors.find(v=>v.id===editVendorSel.value);
     hint.textContent = v ? `聯絡人：${v.contact_person||'—'}　電話：${v.phone||'—'}　LINE/其他：${v.line_contact||'—'}` : '';
+  });
+
+  const vendorSearchInput = document.getElementById("vendor-search-filter");
+  if(editVendorSel && vendorSearchInput && !editVendorSel.dataset.origHtml){
+    editVendorSel.dataset.origHtml = editVendorSel.innerHTML;
+  }
+  if(vendorSearchInput) vendorSearchInput.addEventListener("input", ()=>{
+    const q = vendorSearchInput.value.trim();
+    const origHtml = editVendorSel.dataset.origHtml || editVendorSel.innerHTML;
+    const currentValue = editVendorSel.value;
+    if(!q){
+      editVendorSel.innerHTML = origHtml;
+      editVendorSel.value = currentValue;
+      return;
+    }
+    const temp = document.createElement("select");
+    temp.innerHTML = origHtml;
+    const newSelect = document.createElement("select");
+    Array.from(temp.children).forEach(node=>{
+      if(node.tagName === "OPTION"){
+        if(!node.value || node.textContent.toLowerCase().includes(q.toLowerCase())){
+          newSelect.appendChild(node.cloneNode(true));
+        }
+      } else if(node.tagName === "OPTGROUP"){
+        const matchedOpts = Array.from(node.children).filter(o=> o.textContent.toLowerCase().includes(q.toLowerCase()));
+        if(matchedOpts.length){
+          const og = document.createElement("optgroup");
+          og.label = node.label;
+          matchedOpts.forEach(o=> og.appendChild(o.cloneNode(true)));
+          newSelect.appendChild(og);
+        }
+      }
+    });
+    editVendorSel.innerHTML = newSelect.innerHTML || `<option value="">（沒有符合的廠商）</option>`;
+    editVendorSel.value = currentValue;
   });
 }
 
@@ -1969,8 +2005,27 @@ async function saveAccount(id){
   const storeId = row.querySelector('[data-field="store_id"]').value || null;
   const regionId = row.querySelector('[data-field="region_id"]').value || null;
   const status = row.querySelector('[data-field="status"]').value;
+  const wasDisabled = state.accounts.find(a=>a.id===id)?.status === "disabled";
+
   const { error } = await sb.from("users_profile").update({ role, store_id: storeId, region_id: regionId, status }).eq("id", id);
   if(error){ alert("儲存失敗：" + error.message); return; }
+
+  // 從「待審核」改成啟用時，順便自動確認 Email，避免帳號卡在「Email not confirmed」無法登入
+  if(wasDisabled && status === "active"){
+    try{
+      const { data: { session } } = await sb.auth.getSession();
+      if(session){
+        const res = await fetch(`${SUPABASE_URL}/functions/v1/admin-confirm-email`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "Authorization": `Bearer ${session.access_token}` },
+          body: JSON.stringify({ target_user_id: id })
+        });
+        const result = await res.json();
+        if(!res.ok || result.error) console.error("自動確認Email失敗：", result.error);
+      }
+    }catch(e){ console.error("自動確認Email失敗：", e); }
+  }
+
   await loadAccounts();
   await loadSidebarBadgeCounts();
   alert("✅ 已儲存成功");
