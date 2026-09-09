@@ -161,7 +161,7 @@
 </head>
 <body>
 <div id="app"></div>
-<div class="version-badge">admin build 24</div>
+<div class="version-badge">admin build 27</div>
 
 <script>
 /* ============================================================
@@ -224,6 +224,7 @@ let state = {
   assignmentRules: [], assignmentFilters: { storeId:"", confirmStatus:"" }, assignmentFormError: "", showCopyRulesPanel: false,
   contacts: [], editingStoreId: null, editingContactId: null, generalCategories: [], editingVendorId: null, vendorFilterQ: "",
   infraFilters: { storeId: "" }, infraRecords: [], infraPhotos: {}, sidebarBadges: { newCases: 0, pendingAccounts: 0 },
+  manuals: [], manualFilterQ: "", manualFormError: "",
   dashboardStats: null,
   caseFilters: { status:"", storeId:"", urgency:"", q:"" },
   cases: [],
@@ -285,6 +286,7 @@ function renderSidebar(){
     { key:"stores", label:"門市管理", ico:"🏬" },
     { key:"contacts", label:"通訊錄", ico:"📇" },
     { key:"infrastructure", label:"門市基礎設施", ico:"🔌" },
+    { key:"manuals", label:"設備說明書", ico:"📖" },
     { key:"accounts", label:"帳號管理", ico:"👤", badge: badges.pendingAccounts },
     { key:"vendors", label:"廠商管理", ico:"🧰" },
     { key:"assignment-rules", label:"廠商指派規則", ico:"🗂️" },
@@ -307,7 +309,7 @@ function renderSidebar(){
 }
 
 function renderTopbar(){
-  const titles = { dashboard:"Dashboard", "case-list":"案件列表", "case-detail":"案件詳情", assets:"資產管理", "asset-detail":"資產詳情", stores:"門市管理", contacts:"通訊錄", infrastructure:"門市基礎設施", accounts:"帳號管理", vendors:"廠商管理", "assignment-rules":"廠商指派規則" };
+  const titles = { dashboard:"Dashboard", "case-list":"案件列表", "case-detail":"案件詳情", assets:"資產管理", "asset-detail":"資產詳情", stores:"門市管理", contacts:"通訊錄", infrastructure:"門市基礎設施", manuals:"設備說明書", accounts:"帳號管理", vendors:"廠商管理", "assignment-rules":"廠商指派規則" };
   const showBack = state.view === "case-detail" || state.view === "asset-detail";
   return `
   <div class="topbar">
@@ -325,6 +327,7 @@ function renderViewBody(){
   if(state.view === "stores") return renderStores();
   if(state.view === "contacts") return renderContacts();
   if(state.view === "infrastructure") return renderInfrastructure();
+  if(state.view === "manuals") return renderManuals();
   if(state.view === "accounts") return renderAccounts();
   if(state.view === "vendors") return renderVendors();
   if(state.view === "assignment-rules") return renderAssignmentRules();
@@ -403,6 +406,22 @@ function renderCaseList(){
 }
 
 /* ---------------- 案件詳情 ---------------- */
+function renderCaseAttachmentsInner(){
+  const attachCategories = Object.keys(ATTACH_CATEGORY_LABEL);
+  const attachByCategory = {};
+  attachCategories.forEach(cat=>attachByCategory[cat] = state.caseAttachments.filter(a=>a.category===cat));
+  return attachCategories.map(cat=>`
+    <p style="font-size:12px; font-weight:700; color:var(--ink-soft); margin:14px 0 6px;">${ATTACH_CATEGORY_LABEL[cat]}</p>
+    <div class="attach-grid">
+      ${attachByCategory[cat].map(a=>`
+        <a href="${a.file_path}" target="_blank" class="attach-item" style="text-decoration:none; color:inherit;">
+          <img src="${a.file_path}" onerror="this.style.display='none'">
+          <div class="cap">${new Date(a.uploaded_at).toLocaleDateString('zh-TW')}</div>
+        </a>`).join("")}
+      <div class="attach-upload-btn" data-action="upload-attachment" data-category="${cat}">＋ 上傳</div>
+    </div>`).join("");
+}
+
 function renderCaseDetail(){
   const c = state.currentCase;
   if(!c) return `<div class="empty">找不到案件</div>`;
@@ -419,10 +438,6 @@ function renderCaseDetail(){
     (suggestedOptions ? `<optgroup label="⭐ 本店常用廠商">${suggestedOptions}</optgroup>` : "") +
     `<optgroup label="${(bestMatchOptions||suggestedOptions) ? '其他廠商' : '全部廠商'}">${otherOptions}</optgroup>`;
   const selectedVendorInfo = c.vendor_id ? state.vendors.find(v=>v.id===c.vendor_id) : null;
-
-  const attachCategories = Object.keys(ATTACH_CATEGORY_LABEL);
-  const attachByCategory = {};
-  attachCategories.forEach(cat=>attachByCategory[cat] = state.caseAttachments.filter(a=>a.category===cat));
 
   return `
   <div class="grid grid-2" style="align-items:start;">
@@ -517,16 +532,7 @@ function renderCaseDetail(){
     <div>
       <div class="card">
         <div class="section-title" style="margin-top:0;">附件</div>
-        ${attachCategories.map(cat=>`
-          <p style="font-size:12px; font-weight:700; color:var(--ink-soft); margin:14px 0 6px;">${ATTACH_CATEGORY_LABEL[cat]}</p>
-          <div class="attach-grid">
-            ${attachByCategory[cat].map(a=>`
-              <a href="${a.file_path}" target="_blank" class="attach-item" style="text-decoration:none; color:inherit;">
-                <img src="${a.file_path}" onerror="this.style.display='none'">
-                <div class="cap">${new Date(a.uploaded_at).toLocaleDateString('zh-TW')}</div>
-              </a>`).join("")}
-            <div class="attach-upload-btn" data-action="upload-attachment" data-category="${cat}">＋ 上傳</div>
-          </div>`).join("")}
+        <div id="case-attachments-panel">${renderCaseAttachmentsInner()}</div>
       </div>
 
       <div class="card" style="margin-top:14px;">
@@ -745,6 +751,62 @@ const INFRA_TYPE_LABEL = {
   storefront_location:"門口定位照片（廢清書用）", other:"其他"
 };
 
+/* ---------------- 設備說明書 ---------------- */
+function renderManuals(){
+  const majorOptions = state.assetMajorCategories.map(m=>`<option value="${m.code}">${m.code} ${m.name}</option>`).join("");
+  const vendorOptions = state.vendors.map(v=>`<option value="${v.id}">${v.name}</option>`).join("");
+  const q = state.manualFilterQ || "";
+  const list = q ? state.manuals.filter(m=> (m.title||'').includes(q) || (m.brand||'').includes(q) || (m.model||'').includes(q)) : state.manuals;
+
+  return `
+  <div class="card">
+    <div class="section-title" style="margin-top:0;">新增說明書</div>
+    <div class="grid grid-2">
+      <div><label class="field-label">標題</label><input type="text" id="manual-title" placeholder="例如：台灣星崎味噌機 故障碼對照表"></div>
+      <div><label class="field-label">品牌</label><input type="text" id="manual-brand" placeholder="例如：星崎"></div>
+      <div><label class="field-label">型號（選填）</label><input type="text" id="manual-model"></div>
+      <div><label class="field-label">相關廠商（選填）</label><select id="manual-vendor"><option value="">— 未指定 —</option>${vendorOptions}</select></div>
+      <div><label class="field-label">設備大類（選填）</label>
+        <select id="manual-major">
+          <option value="">— 未指定 —</option>${majorOptions}
+        </select>
+      </div>
+      <div><label class="field-label">中類（選填）</label>
+        <select id="manual-minor"><option value="">— 先選大類 —</option></select>
+      </div>
+    </div>
+    <label class="field-label">備註（選填）</label>
+    <textarea id="manual-notes" placeholder="例如：常見故障碼 E1=缺水、E3=溫控異常"></textarea>
+    <label class="field-label">檔案（PDF 或圖片）</label>
+    <input type="file" id="manual-file" accept="application/pdf,image/*">
+    ${state.manualFormError ? `<div class="error-msg">${state.manualFormError}</div>` : ""}
+    <button class="btn btn-primary" style="margin-top:12px;" data-action="add-manual">上傳說明書</button>
+  </div>
+
+  <div class="filter-bar">
+    <input type="text" id="manual-filter-q" placeholder="搜尋標題／品牌／型號…" value="${q}">
+    <button class="btn btn-outline btn-sm" data-action="apply-manual-filter">套用篩選</button>
+  </div>
+  <div class="card" style="padding:0; overflow-x:auto;">
+    <table>
+      <thead><tr><th>標題</th><th>品牌／型號</th><th>相關廠商</th><th>備註</th><th></th></tr></thead>
+      <tbody>
+        ${list.length===0 ? `<tr><td colspan="5" style="text-align:center; color:var(--ink-soft); padding:30px;">尚無說明書資料</td></tr>` : list.map(m=>{
+          const vendor = state.vendors.find(v=>v.id===m.vendor_id);
+          return `
+          <tr>
+            <td><a href="${m.file_url}" target="_blank">${m.title}</a></td>
+            <td>${[m.brand,m.model].filter(Boolean).join(' / ')||'—'}</td>
+            <td>${vendor?vendor.name:'—'}</td>
+            <td style="font-size:12px; color:var(--ink-soft);">${m.notes||''}</td>
+            <td><button class="btn btn-outline btn-sm" style="color:var(--err,#C13F3F); border-color:var(--err,#C13F3F);" data-action="delete-manual" data-id="${m.id}">🗑 刪除</button></td>
+          </tr>`;
+        }).join("")}
+      </tbody>
+    </table>
+  </div>`;
+}
+
 function renderInfrastructure(){
   const f = state.infraFilters || { storeId:"" };
   const storeOptions = state.stores.filter(s=>s.status==='active').map(s=>`<option value="${s.id}" ${f.storeId===s.id?'selected':''}>${s.code?('['+s.code+'] '):''}${s.name}</option>`).join("");
@@ -927,20 +989,21 @@ function renderAssetDetail(){
     ${!isNew ? `
     <div class="card" style="grid-column:1 / -1;">
       <div class="section-title" style="margin-top:0;">設備照片</div>
-      <div class="attach-grid">
-        ${state.assetAttachments.map(p=>`
-          <div class="attach-item" style="position:relative;">
-            <a href="${p.file_path}" target="_blank" style="text-decoration:none; color:inherit; display:block;">
-              <img src="${p.file_path}" onerror="this.style.display='none'">
-              <div class="cap">${new Date(p.uploaded_at).toLocaleDateString('zh-TW')}</div>
-            </a>
-            <button type="button" data-action="delete-asset-photo" data-id="${p.id}"
-              style="position:absolute; top:4px; right:4px; background:rgba(193,63,63,.9); color:#fff; border:none; border-radius:5px; width:22px; height:22px; line-height:1; cursor:pointer; font-size:13px;">✕</button>
-          </div>`).join("")}
-        <div class="attach-upload-btn" data-action="upload-asset-photo">＋ 上傳照片</div>
-      </div>
+      <div id="asset-photos-panel" class="attach-grid">${renderAssetPhotosInner()}</div>
     </div>` : ""}
   </div>`;
+}
+
+function renderAssetPhotosInner(){
+  return state.assetAttachments.map(p=>`
+    <div class="attach-item" style="position:relative;">
+      <a href="${p.file_path}" target="_blank" style="text-decoration:none; color:inherit; display:block;">
+        <img src="${p.file_path}" onerror="this.style.display='none'">
+        <div class="cap">${new Date(p.uploaded_at).toLocaleDateString('zh-TW')}</div>
+      </a>
+      <button type="button" data-action="delete-asset-photo" data-id="${p.id}"
+        style="position:absolute; top:4px; right:4px; background:rgba(193,63,63,.9); color:#fff; border:none; border-radius:5px; width:22px; height:22px; line-height:1; cursor:pointer; font-size:13px;">✕</button>
+    </div>`).join("") + `<div class="attach-upload-btn" data-action="upload-asset-photo">＋ 上傳照片</div>`;
 }
 
 /* ---------------- 廠商管理 ---------------- */
@@ -1165,6 +1228,15 @@ function bindEvents(){
     editVendorSel.innerHTML = newSelect.innerHTML || `<option value="">（沒有符合的廠商）</option>`;
     editVendorSel.value = currentValue;
   });
+
+  const manualMajorSel = document.getElementById("manual-major");
+  if(manualMajorSel) manualMajorSel.addEventListener("change", ()=>{
+    const minorSel = document.getElementById("manual-minor");
+    if(!minorSel) return;
+    const opts = state.assetMinorCategories.filter(m=> m.major_code === manualMajorSel.value);
+    minorSel.innerHTML = `<option value="">${opts.length ? '— 請選擇 —' : '— 先選大類 —'}</option>` +
+      opts.map(m=>`<option value="${m.id}">${m.code} ${m.name}</option>`).join("");
+  });
 }
 
 async function onAction(e){
@@ -1180,7 +1252,7 @@ async function onAction(e){
   }
   else if(action === "apply-case-filters"){ applyCaseFilters(); }
   else if(action === "open-case"){ await openCase(el.dataset.id); }
-  else if(action === "save-case"){ await saveCase(); }
+  else if(action === "save-case"){ await saveCase(el); }
   else if(action === "copy-case-info"){ copyCaseInfo(); }
   else if(action === "upload-attachment"){ triggerAttachmentUpload("case", state.currentCase.id, el.dataset.category); }
   else if(action === "upload-asset-photo"){ triggerAttachmentUpload("asset", state.currentAsset.id, "asset_photo"); }
@@ -1207,6 +1279,9 @@ async function onAction(e){
   else if(action === "apply-infra-filters"){ state.infraFilters.storeId = document.getElementById("infra-filter-store")?.value || ""; await loadInfraRecords(); render(); }
   else if(action === "delete-infra-record"){ await deleteInfraRecord(el.dataset.id); }
   else if(action === "delete-infra-photo"){ await deleteInfraPhoto(el.dataset.id, el.dataset.record); }
+  else if(action === "add-manual"){ await addManual(); }
+  else if(action === "delete-manual"){ await deleteManual(el.dataset.id); }
+  else if(action === "apply-manual-filter"){ state.manualFilterQ = document.getElementById("manual-filter-q")?.value || ""; render(); }
   else if(action === "apply-asset-filters"){ await applyAssetFilters(); }
   else if(action === "open-asset"){ await openAsset(el.dataset.id); }
   else if(action === "new-asset"){ newAssetForm(); }
@@ -1367,7 +1442,16 @@ async function deleteAssetPhoto(attachmentId){
 async function loadAssetAttachments(assetId){
   const { data } = await sb.from("attachments").select("*").eq("related_type","asset").eq("related_id", assetId).order("uploaded_at", { ascending:false });
   state.assetAttachments = data || [];
-  if(state.view === "asset-detail") render();
+  const panel = document.getElementById("asset-photos-panel");
+  if(panel && state.view === "asset-detail"){
+    panel.innerHTML = renderAssetPhotosInner();
+    panel.querySelectorAll("[data-action]").forEach(el=>{
+      if(el.tagName === "SELECT") return;
+      el.addEventListener("click", onAction);
+    });
+  } else if(state.view === "asset-detail"){
+    render();
+  }
 }
 
 function newAssetForm(){
@@ -1774,6 +1858,7 @@ async function goTo(view){
   else if(view === "stores"){ await loadRegions(); await loadStores(); await loadGeneralCategories(); }
   else if(view === "contacts"){ await loadRegions(); await loadStores(); await loadContacts(); }
   else if(view === "infrastructure"){ await loadStores(); await loadInfraRecords(); }
+  else if(view === "manuals"){ await loadAssetMajorCategories(); await loadAssetMinorCategories(); await loadVendors(); await loadManuals(); }
   else if(view === "accounts"){ await loadRegions(); await loadAccounts(); }
   else if(view === "vendors") await loadVendors();
   else if(view === "assignment-rules") await loadVendors();
@@ -1870,10 +1955,20 @@ async function loadCaseLogs(caseId){
 async function loadCaseAttachments(caseId){
   const { data } = await sb.from("attachments").select("*").eq("related_type","case").eq("related_id", caseId).order("uploaded_at", { ascending:false });
   state.caseAttachments = data || [];
-  if(state.view === "case-detail") render();
+  const panel = document.getElementById("case-attachments-panel");
+  if(panel && state.view === "case-detail"){
+    panel.innerHTML = renderCaseAttachmentsInner();
+    panel.querySelectorAll("[data-action]").forEach(el=>{
+      if(el.tagName === "SELECT") return;
+      el.addEventListener("click", onAction);
+    });
+  } else if(state.view === "case-detail"){
+    render();
+  }
 }
 
-async function saveCase(){
+async function saveCase(btn){
+  if(btn){ if(btn.disabled) return; btn.disabled = true; btn.textContent = "儲存中…"; }
   const c = state.currentCase;
   const newStatus = document.getElementById("edit-status").value;
   const note = document.getElementById("edit-note").value.trim();
@@ -1900,8 +1995,11 @@ async function saveCase(){
   if(newStatus === "closed" && !c.closed_at) updates.closed_at = new Date().toISOString();
 
   const { error } = await sb.from("cases").update(updates).eq("id", c.id);
-  const statusEl = document.getElementById("save-status");
-  if(error){ statusEl.innerHTML = `<div class="error-msg">儲存失敗：${error.message}</div>`; return; }
+  if(error){
+    alert("儲存失敗：" + error.message);
+    if(btn){ btn.disabled = false; btn.textContent = "儲存變更"; }
+    return;
+  }
 
   if(newStatus !== c.status || note){
     await sb.from("case_logs").insert({
@@ -1912,8 +2010,9 @@ async function saveCase(){
     });
   }
 
-  statusEl.innerHTML = `<div class="success-msg">已儲存</div>`;
+  await loadSidebarBadgeCounts();
   await openCase(c.id);
+  alert("✅ 已儲存成功");
 }
 
 function numOrNull(v){ return v === "" || v === null || v === undefined ? null : Number(v); }
@@ -2090,6 +2189,68 @@ async function deleteInfraPhoto(attachmentId, recordId){
     }
   }catch(e){ /* 檔案清理失敗不影響資料庫紀錄 */ }
   await loadInfraRecords();
+  render();
+}
+
+async function loadManuals(){
+  const { data, error } = await sb.from("equipment_manuals").select("*").order("uploaded_at",{ascending:false});
+  if(error){ alert("載入失敗：" + error.message); return; }
+  state.manuals = data || [];
+}
+
+async function addManual(){
+  const title = document.getElementById("manual-title").value.trim();
+  const fileInput = document.getElementById("manual-file");
+  const file = fileInput.files[0];
+  if(!title){ state.manualFormError = "請輸入標題"; render(); return; }
+  if(!file){ state.manualFormError = "請選擇檔案"; render(); return; }
+
+  try{
+    const ext = (file.name.split(".").pop() || "pdf").toLowerCase();
+    const path = `equipment-manuals/${Date.now()}-${Math.random().toString(36).slice(2,7)}.${ext}`;
+    const { error: upErr } = await sb.storage.from("attachments").upload(path, file);
+    if(upErr) throw upErr;
+    const { data: urlData } = sb.storage.from("attachments").getPublicUrl(path);
+
+    const payload = {
+      title, brand: document.getElementById("manual-brand").value || null,
+      model: document.getElementById("manual-model").value || null,
+      vendor_id: document.getElementById("manual-vendor").value || null,
+      major_code: document.getElementById("manual-major").value || null,
+      minor_category_id: document.getElementById("manual-minor").value || null,
+      notes: document.getElementById("manual-notes").value || null,
+      file_url: urlData.publicUrl,
+      uploaded_by: state.profile?.id || null
+    };
+    const { error: insErr } = await sb.from("equipment_manuals").insert(payload);
+    if(insErr) throw insErr;
+
+    state.manualFormError = "";
+    await loadManuals();
+    alert("✅ 已上傳成功");
+    render();
+  }catch(e){
+    state.manualFormError = "上傳失敗：" + e.message;
+    render();
+  }
+}
+
+async function deleteManual(id){
+  if(!confirm("確定要刪除這份說明書嗎？")) return;
+  const manual = state.manuals.find(m=>m.id===id);
+  const { error } = await sb.from("equipment_manuals").delete().eq("id", id);
+  if(error){ alert("刪除失敗：" + error.message); return; }
+  try{
+    if(manual?.file_url){
+      const marker = "/attachments/";
+      const idx = manual.file_url.indexOf(marker);
+      if(idx >= 0){
+        const path = decodeURIComponent(manual.file_url.slice(idx + marker.length));
+        await sb.storage.from("attachments").remove([path]);
+      }
+    }
+  }catch(e){ /* 檔案清理失敗不影響資料庫紀錄 */ }
+  await loadManuals();
   render();
 }
 
