@@ -117,7 +117,9 @@
   .ticket{
     background:var(--surface); border-radius:6px;
     box-shadow:var(--shadow); margin-bottom:12px; position:relative; border:1px solid var(--border);
+    border-left:4px solid transparent;
   }
+  .ticket[data-urgency="urgent"]{ border-left-color:var(--urgent); background:linear-gradient(90deg, rgba(193,63,63,.06), var(--surface) 60px); }
   .ticket-body{ padding:16px 18px 14px; position:relative; }
   .ticket-body::before, .ticket-body::after{
     content:""; position:absolute; width:10px; height:10px; border:2px solid var(--border);
@@ -127,6 +129,10 @@
   .ticket[data-urgency="urgent"] .ticket-body::before, .ticket[data-urgency="urgent"] .ticket-body::after{ border-color:var(--urgent); }
   .ticket[data-urgency="operational"] .ticket-body::before, .ticket[data-urgency="operational"] .ticket-body::after{ border-color:var(--warn); }
   .ticket[data-urgency="normal"] .ticket-body::before, .ticket[data-urgency="normal"] .ticket-body::after{ border-color:var(--normal); }
+  .urgent-tag{
+    display:inline-flex; align-items:center; gap:4px; font-size:11px; font-weight:700; color:#fff;
+    background:var(--urgent); padding:2px 8px; border-radius:5px; margin-left:8px; vertical-align:middle;
+  }
   .ticket-top{ display:flex; justify-content:space-between; align-items:flex-start; gap:8px; padding:0 6px; }
   .ticket-no{ font-family:"JetBrains Mono",monospace; font-size:11px; color:var(--ink-soft); letter-spacing:.5px; }
   .ticket-title{ font-size:15px; font-weight:700; margin:4px 0 2px; }
@@ -623,7 +629,7 @@ function ticketHtml(c){
       <div class="ticket-top">
         <div>
           <div class="ticket-no">#${c.case_no}</div>
-          <div class="ticket-title">${c.fault_category || c.general_category || '報修案件'}</div>
+          <div class="ticket-title">${c.fault_category || c.general_category || '報修案件'}${c.urgency==='urgent' ? '<span class="urgent-tag">🔴 緊急</span>' : ''}</div>
           <div class="ticket-sub">${subLine}</div>
         </div>
         <span class="status-pill" data-active="${needsAction}">${needsAction? '⚠️ ' : ''}${STATUS_LABEL[c.status]||c.status}</span>
