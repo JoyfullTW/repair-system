@@ -209,7 +209,7 @@
     載入中…如果這段文字一直沒有消失，代表網頁程式無法執行，請截圖回報。
   </div>
 </div>
-<div class="version-badge">store build 13</div>
+<div class="version-badge">store build 14</div>
 
 <script>
 /* ============================================================
@@ -293,6 +293,7 @@ let state = {
     infraFormError:"", infraSessionCount:0,
     photoStoreId:"", photoAssetResults:[], photoSelectedAsset:null, photoAssetAttachments:[], photoNoPhotoOnly:false,
   },
+  manualResults: [], myCasesStoreFilter: "", myCasesShowClosed: false,
 };
 
 const app = document.getElementById("app");
@@ -315,6 +316,7 @@ function render(){
   else if(state.view === "setup-new-asset") app.innerHTML = renderSetupNewAsset();
   else if(state.view === "setup-new-infra") app.innerHTML = renderSetupNewInfra();
   else if(state.view === "setup-asset-photo") app.innerHTML = renderSetupAssetPhoto();
+  else if(state.view === "manuals") app.innerHTML = renderManualsSearch();
   bindEvents();
 }
 
@@ -393,6 +395,34 @@ function renderProfileMissing(){
     </div>
   </div>`;
 }
+/* ---------------- 設備說明書查詢 ---------------- */
+function renderManualsSearch(){
+  const results = state.manualResults || [];
+  return `
+  <header class="topbar">
+    <span class="back" data-action="go-home">‹</span>
+    <h1>設備說明書</h1>
+  </header>
+  <main>
+    <label class="field-label">搜尋設備名稱／品牌／型號</label>
+    <div style="display:flex; gap:8px;">
+      <input type="text" id="manual-search-input" placeholder="例如：味噌機、星崎、E3">
+      <button class="btn btn-outline" data-action="search-manuals" style="white-space:nowrap; padding:0 14px; width:auto; flex-shrink:0;">搜尋</button>
+    </div>
+    <p style="font-size:12px; color:var(--ink-soft); margin:8px 0 0;">留空直接搜尋，會列出全部說明書。</p>
+    <div style="margin-top:14px;">
+      ${results.length===0 ? `<p style="font-size:13px; color:var(--ink-soft); text-align:center; padding:20px 0;">尚無結果，試試看直接按搜尋列出全部</p>` :
+        results.map(m=>`
+        <a href="${m.file_url}" target="_blank" class="card" style="padding:14px; display:block; text-decoration:none; color:inherit; margin-bottom:10px;">
+          <strong style="font-size:14px;">${m.title}</strong>
+          <div style="font-size:12px; color:var(--ink-soft); margin-top:4px;">${[m.brand,m.model].filter(Boolean).join(' / ')||''}</div>
+          ${m.notes ? `<div style="font-size:13px; margin-top:6px;">${m.notes}</div>` : ""}
+          <div style="font-size:12px; color:var(--steel-dark, var(--primary)); margin-top:8px;">📄 點此開啟／下載</div>
+        </a>`).join("")}
+    </div>
+  </main>`;
+}
+
 function renderHome(){
   const notStoreAccount = state.profile && state.profile.role !== "store";
   const canSetup = state.profile && ["general_affairs","admin"].includes(state.profile.role);
@@ -413,6 +443,10 @@ function renderHome(){
       <div class="cta" data-action="go-my-cases">
         <div class="ico">📁</div>
         <div class="txt"><strong>我的案件</strong><span>查看進度、補件、確認完修</span></div>
+      </div>
+      <div class="cta" data-action="go-manuals">
+        <div class="ico">📖</div>
+        <div class="txt"><strong>設備說明書</strong><span>報修前先查故障碼、操作手冊</span></div>
       </div>
       ${canSetup ? `
       <div class="cta" data-action="go-setup-menu" style="border-left:4px solid var(--warn);">
@@ -551,15 +585,31 @@ function renderSuccess(){
 
 /* ---------------- 我的案件列表 ---------------- */
 function renderMyCases(){
-  const rows = state.cases;
+  const allRows = state.cases;
+  const showClosed = state.myCasesShowClosed;
+  const rows = showClosed ? allRows : allRows.filter(c=> !["closed","cancelled"].includes(c.status));
+  const closedCount = allRows.length - rows.length;
+  const isManagement = !state.storeId; // 沒有綁定固定門市＝總務／管理層帳號
+  const storeOptions = (state.setup?.allStores||[]).map(st=>`<option value="${st.id}" ${state.myCasesStoreFilter===st.id?'selected':''}>${st.code?('['+st.code+'] '):''}${st.name}</option>`).join("");
   return `
   <header class="topbar">
     <span class="back" data-action="go-home">‹</span>
     <h1>我的案件</h1>
   </header>
   <main>
+    ${isManagement ? `
+    <label class="field-label">篩選門市（不選就是最近 50 筆全部門市）</label>
+    <select id="my-cases-store-filter">
+      <option value="">全部門市</option>${storeOptions}
+    </select>
+    <button class="btn btn-outline" data-action="filter-my-cases" style="margin:10px 0 16px; width:auto; padding:0 16px; height:40px;">套用篩選</button>
+    ` : ""}
+    <label style="display:flex; align-items:center; gap:8px; font-size:13px; margin-bottom:14px;">
+      <input type="checkbox" id="my-cases-show-closed" ${showClosed?'checked':''} style="width:auto;">
+      顯示已結案／取消的案件${!showClosed && closedCount>0 ? `（目前收起 ${closedCount} 筆）` : ''}
+    </label>
     ${rows.length === 0 ? `
-      <div class="empty"><span class="mark">📭</span>目前沒有報修案件</div>
+      <div class="empty"><span class="mark">📭</span>${allRows.length===0 ? '目前沒有報修案件' : '目前沒有需要追蹤的案件，都處理完了 🎉'}</div>
     ` : rows.map(c => ticketHtml(c)).join("")}
   </main>`;
 }
@@ -587,6 +637,7 @@ function ticketHtml(c){
 function renderCaseDetail(){
   const c = state.currentCase;
   if(!c) return `<main><div class="empty">找不到案件</div></main>`;
+  const isManagement = state.profile && ["general_affairs","admin","district_manager"].includes(state.profile.role);
 
   let actionArea = "";
   if(c.status === "pending_info"){
@@ -609,6 +660,21 @@ function renderCaseDetail(){
       </div>`;
   }
 
+  // 總務／區經理等管理層，額外顯示廠商處理資訊；門市帳號維持單純畫面，只看狀態與該做的事
+  const vendorArea = (isManagement && c.vendor_info) ? `
+    <div class="card">
+      <strong style="font-size:14px;">🔧 廠商處理資訊</strong>
+      <p style="font-size:13px; margin:8px 0 2px;">廠商：${c.vendor_info.name}</p>
+      ${c.vendor_info.contact_person ? `<p style="font-size:13px; margin:2px 0; color:var(--ink-soft);">聯絡人：${c.vendor_info.contact_person}</p>` : ""}
+      ${c.vendor_info.phone ? `<p style="font-size:13px; margin:2px 0; color:var(--ink-soft);">電話：${c.vendor_info.phone}</p>` : ""}
+      ${c.vendor_info.line_contact ? `<p style="font-size:13px; margin:2px 0; color:var(--ink-soft);">LINE/其他：${c.vendor_info.line_contact}</p>` : ""}
+      ${c.repair_result ? `<p style="font-size:13px; margin:10px 0 2px; font-weight:700;">處理結果</p><p style="font-size:13px; color:var(--ink-soft);">${c.repair_result}</p>` : ""}
+    </div>` : (isManagement ? `
+    <div class="card">
+      <strong style="font-size:14px;">🔧 廠商處理資訊</strong>
+      <p style="font-size:13px; color:var(--ink-soft); margin-top:8px;">尚未指定廠商，請至後台指派。</p>
+    </div>` : "");
+
   return `
   <header class="topbar">
     <span class="back" data-action="go-my-cases">‹</span>
@@ -622,6 +688,7 @@ function renderCaseDetail(){
       <p style="font-size:12px; color:var(--ink-soft); margin-top:10px;">緊急程度：${URGENCY_LABEL[c.urgency]||''}</p>
     </div>
     ${actionArea}
+    ${vendorArea}
     <div class="card">
       <strong style="font-size:14px;">處理進度</strong>
       <div id="case-timeline" style="margin-top:10px; font-size:13px; color:var(--ink-soft);">載入中…</div>
@@ -916,6 +983,11 @@ function bindEvents(){
   if(photoStoreSelect) photoStoreSelect.addEventListener("change", async ()=>{ await searchAssetForPhoto(); });
   const photoNoPhotoOnly = document.getElementById("photo-nophoto-only");
   if(photoNoPhotoOnly) photoNoPhotoOnly.addEventListener("change", async ()=>{ await searchAssetForPhoto(); });
+  const myCasesShowClosedCb = document.getElementById("my-cases-show-closed");
+  if(myCasesShowClosedCb) myCasesShowClosedCb.addEventListener("change", ()=>{
+    state.myCasesShowClosed = myCasesShowClosedCb.checked;
+    render();
+  });
 }
 
 /* ============================================================
@@ -1076,7 +1148,18 @@ async function onAction(e){
     if(state.generalCategories.length === 0) await loadGeneralCategories();
     state.view="new-report"; render();
   }
-  else if(action === "go-my-cases"){ await loadMyCases(); state.view="my-cases"; render(); }
+  else if(action === "go-my-cases"){
+    if(!state.storeId && !state.setup.allStores.length) await loadAllStoresForSetup();
+    await loadMyCases();
+    state.view="my-cases"; render();
+  }
+  else if(action === "filter-my-cases"){
+    state.myCasesStoreFilter = document.getElementById("my-cases-store-filter")?.value || "";
+    await loadMyCases();
+    render();
+  }
+  else if(action === "go-manuals"){ state.manualResults = []; state.view="manuals"; render(); }
+  else if(action === "search-manuals"){ await searchManuals(); }
   else if(action === "report-back"){ backReportStep(); }
   else if(action === "pick-type"){ state.newReport.repairType = el.dataset.type; state.newReport.step = 2; render(); }
   else if(action === "pick-general"){ state.newReport.generalCategory = el.dataset.value; render(); }
@@ -1269,8 +1352,10 @@ async function loadMyCases(){
   let query = sb.from("cases").select("*, assets(name), stores(name)").order("created_at", { ascending:false });
   if(state.storeId){
     query = query.eq("store_id", state.storeId);
+  }else if(state.myCasesStoreFilter){
+    query = query.eq("store_id", state.myCasesStoreFilter);
   }else{
-    query = query.limit(50); // 非固定門市帳號（總務/管理者）先限制顯示最近 50 筆，避免列表過長
+    query = query.limit(50); // 非固定門市帳號（總務/管理者）沒選門市時，先限制顯示最近 50 筆，避免列表過長
   }
   const { data, error } = await query;
   if(error){ alert("載入失敗：" + error.message); return; }
@@ -1278,9 +1363,9 @@ async function loadMyCases(){
 }
 
 async function openCase(id){
-  const { data, error } = await sb.from("cases").select("*, assets(name)").eq("id", id).single();
+  const { data, error } = await sb.from("cases").select("*, assets(name), vendors(name, contact_person, phone, line_contact)").eq("id", id).single();
   if(error){ alert("載入失敗：" + error.message); return; }
-  state.currentCase = { ...data, asset_name: data.assets?.name || "" };
+  state.currentCase = { ...data, asset_name: data.assets?.name || "", vendor_info: data.vendors || null };
   state.caseUploadMarks = {};
   state.view = "case-detail";
   render();
@@ -1515,6 +1600,16 @@ async function captureInfraLocation(){
     });
   }catch(e){ /* 指南針取得失敗，不影響流程 */ }
 
+  render();
+}
+
+async function searchManuals(){
+  const q = document.getElementById("manual-search-input")?.value.trim() || "";
+  let query = sb.from("equipment_manuals").select("*").order("uploaded_at",{ascending:false}).limit(50);
+  if(q) query = query.or(`title.ilike.%${q}%,brand.ilike.%${q}%,model.ilike.%${q}%,notes.ilike.%${q}%`);
+  const { data, error } = await query;
+  if(error){ alert("搜尋失敗：" + error.message); return; }
+  state.manualResults = data || [];
   render();
 }
 
