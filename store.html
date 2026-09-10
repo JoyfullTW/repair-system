@@ -130,8 +130,9 @@
   .ticket[data-urgency="operational"] .ticket-body::before, .ticket[data-urgency="operational"] .ticket-body::after{ border-color:var(--warn); }
   .ticket[data-urgency="normal"] .ticket-body::before, .ticket[data-urgency="normal"] .ticket-body::after{ border-color:var(--normal); }
   .urgent-tag{
-    display:inline-flex; align-items:center; gap:4px; font-size:11px; font-weight:700; color:#fff;
-    background:var(--urgent); padding:2px 8px; border-radius:5px; margin-left:8px; vertical-align:middle;
+    display:inline-flex; align-items:center; justify-content:center;
+    width:18px; height:18px; font-size:12px; font-weight:800; color:#fff;
+    background:var(--urgent); border-radius:50%; margin-left:6px; vertical-align:middle;
   }
   .ticket-top{ display:flex; justify-content:space-between; align-items:flex-start; gap:8px; padding:0 6px; }
   .ticket-no{ font-family:"JetBrains Mono",monospace; font-size:11px; color:var(--ink-soft); letter-spacing:.5px; }
@@ -215,7 +216,7 @@
     載入中…如果這段文字一直沒有消失，代表網頁程式無法執行，請截圖回報。
   </div>
 </div>
-<div class="version-badge">store build 18</div>
+<div class="version-badge">store build 20</div>
 
 <script>
 /* ============================================================
@@ -629,7 +630,7 @@ function ticketHtml(c){
       <div class="ticket-top">
         <div>
           <div class="ticket-no">#${c.case_no}</div>
-          <div class="ticket-title">${c.fault_category || c.general_category || '報修案件'}${c.urgency==='urgent' ? '<span class="urgent-tag">🔴 緊急</span>' : ''}</div>
+          <div class="ticket-title">${c.fault_category || c.general_category || '報修案件'}${c.urgency==='urgent' ? '<span class="urgent-tag">!</span>' : ''}</div>
           <div class="ticket-sub">${subLine}</div>
         </div>
         <span class="status-pill" data-active="${needsAction}">${needsAction? '⚠️ ' : ''}${STATUS_LABEL[c.status]||c.status}</span>
@@ -647,10 +648,11 @@ function renderCaseDetail(){
 
   let actionArea = "";
   if(c.status === "pending_info"){
+    const infoNote = (state.caseLogsRaw||[]).find(l=> l.to_status === "pending_info" && l.note);
     actionArea = `
       <div class="card">
         <strong>📎 需要補充資料</strong>
-        <p style="font-size:13px; color:var(--ink-soft);">總務標記此案件需要補件，請上傳所需的照片或說明。</p>
+        <p style="font-size:13px; color:var(--ink-soft);">${infoNote ? `總務說明：${infoNote.note}` : "總務標記此案件需要補件，請上傳所需的照片或說明。"}</p>
         <div class="upload-grid">${[0,1,2].map(i=>`<div class="upload-slot" data-action="upload-supplement" data-index="${i}">${state.caseUploadMarks[`supplement-${i}`]?'✅':'＋'}</div>`).join("")}</div>
       </div>`;
   } else if(c.status === "pending_store_confirm"){
@@ -689,15 +691,36 @@ function renderCaseDetail(){
   <main>
     <div class="card">
       <span class="status-pill" data-active="true">${STATUS_LABEL[c.status]||c.status}</span>
-      <p style="margin:12px 0 2px; font-weight:700;">${c.fault_category||c.general_category||''}</p>
-      <p style="font-size:13px; color:var(--ink-soft); margin:2px 0;">${c.fault_description||''}</p>
-      <p style="font-size:12px; color:var(--ink-soft); margin-top:10px;">緊急程度：${URGENCY_LABEL[c.urgency]||''}</p>
+      <p style="margin:12px 0 2px; font-weight:700; font-size:16px;">${c.fault_category||c.general_category||''}${c.urgency==='urgent' ? '<span class="urgent-tag">!</span>' : ''}</p>
+      ${c.store_name ? `<p style="font-size:12px; color:var(--ink-soft); margin:2px 0;">門市：${c.store_name}</p>` : ""}
+      ${c.fault_reason ? `<p style="font-size:13px; margin:10px 0 2px;"><strong>報修原因：</strong>${c.fault_reason}</p>` : ""}
+      ${c.suspected_cause ? `<p style="font-size:13px; margin:2px 0;"><strong>推測原因：</strong>${c.suspected_cause}</p>` : ""}
+      ${c.fault_description ? `<p style="font-size:13px; margin:2px 0;"><strong>目前狀況：</strong>${c.fault_description}</p>` : ""}
+      <p style="font-size:12px; color:var(--ink-soft); margin-top:10px;">
+        緊急程度：${URGENCY_LABEL[c.urgency]||''}　
+        ${c.report_date ? `報修日期：${c.report_date}　` : ""}
+        ${c.reporter_name ? `報修人：${c.reporter_name}` : ""}
+      </p>
     </div>
+    ${(state.caseDetailPhotos && state.caseDetailPhotos.length) ? `
+    <div class="card">
+      <strong style="font-size:14px;">已上傳照片</strong>
+      <div class="attach-grid" style="margin-top:10px;">
+        ${state.caseDetailPhotos.map(p=>`
+          <a href="${p.file_path}" target="_blank" class="attach-item" style="text-decoration:none;">
+            <img src="${p.file_path}" onerror="this.style.display='none'">
+          </a>`).join("")}
+      </div>
+    </div>` : ""}
     ${actionArea}
     ${vendorArea}
     <div class="card">
       <strong style="font-size:14px;">處理進度</strong>
-      <div id="case-timeline" style="margin-top:10px; font-size:13px; color:var(--ink-soft);">載入中…</div>
+      <div id="case-timeline" style="margin-top:10px; font-size:13px; color:var(--ink-soft);">
+        ${!state.caseLogsRaw ? '載入中…' :
+          state.caseLogsRaw.length===0 ? '尚無處理紀錄' :
+          state.caseLogsRaw.map(l=>`<div style="margin-bottom:6px;">・${new Date(l.created_at).toLocaleString('zh-TW')}　${l.note||l.action_type}</div>`).join("")}
+      </div>
     </div>
   </main>`;
 }
@@ -1369,23 +1392,29 @@ async function loadMyCases(){
 }
 
 async function openCase(id){
-  const { data, error } = await sb.from("cases").select("*, assets(name), vendors(name, contact_person, phone, line_contact)").eq("id", id).single();
+  const { data, error } = await sb.from("cases").select("*, assets(name), stores(name), vendors(name, contact_person, phone, line_contact)").eq("id", id).single();
   if(error){ alert("載入失敗：" + error.message); return; }
-  state.currentCase = { ...data, asset_name: data.assets?.name || "", vendor_info: data.vendors || null };
+  state.currentCase = { ...data, asset_name: data.assets?.name || "", store_name: data.stores?.name || "", vendor_info: data.vendors || null };
   state.caseUploadMarks = {};
+  state.caseDetailPhotos = [];
+  state.caseLogsRaw = null;
   state.view = "case-detail";
   render();
   loadCaseTimeline(id);
+  loadCaseDetailPhotos(id);
+}
+
+async function loadCaseDetailPhotos(caseId){
+  const { data } = await sb.from("attachments").select("*").eq("related_type","case").eq("related_id", caseId).eq("category","fault_photo_video").order("uploaded_at",{ascending:false});
+  state.caseDetailPhotos = data || [];
+  if(state.view === "case-detail") render();
 }
 
 async function loadCaseTimeline(caseId){
-  const el = document.getElementById("case-timeline");
-  if(!el) return;
   const { data, error } = await sb.from("case_logs")
     .select("*").eq("case_id", caseId).order("created_at", { ascending:true });
-  if(error){ el.textContent = "無法載入處理歷程"; return; }
-  if(!data || data.length===0){ el.textContent = "尚無處理紀錄"; return; }
-  el.innerHTML = data.map(l=>`<div style="margin-bottom:6px;">・${new Date(l.created_at).toLocaleString('zh-TW')}　${l.note||l.action_type}</div>`).join("");
+  state.caseLogsRaw = error ? [] : (data || []);
+  if(state.view === "case-detail") render();
 }
 
 async function confirmCaseResult(result){
