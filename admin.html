@@ -161,7 +161,7 @@
 </head>
 <body>
 <div id="app"></div>
-<div class="version-badge">admin build 28</div>
+<div class="version-badge">admin build 30</div>
 
 <script>
 /* ============================================================
@@ -194,12 +194,12 @@ const STATUS_LABEL = {
   new:"新案件", pending_review:"待總務確認", pending_info:"資料待補",
   initial_troubleshoot:"初步排除中", contacting_vendor:"聯絡廠商中", pending_quote:"等待報價",
   pending_approval:"等待核准", scheduled:"已安排維修", pending_parts:"等待零件",
-  in_repair:"維修中", pending_store_confirm:"待門市確認", repair_done:"維修完成",
+  in_repair:"已安排／維修中", pending_store_confirm:"待門市確認", repair_done:"維修完成",
   closed:"已結案", cancelled:"已取消"
 };
 const STATUS_GROUPS = [
   { label:"待受理", options:["new","pending_review","pending_info"] },
-  { label:"處理中", options:["initial_troubleshoot","contacting_vendor","pending_quote","pending_approval","scheduled","pending_parts","in_repair"] },
+  { label:"處理中", options:["initial_troubleshoot","contacting_vendor","pending_quote","pending_approval","pending_parts","in_repair"] },
   { label:"待確認／完成", options:["pending_store_confirm","repair_done"] },
   { label:"結束", options:["closed","cancelled"] },
 ];
@@ -228,7 +228,7 @@ let state = {
   dashboardStats: null,
   caseFilters: { status:"", storeId:"", urgency:"", q:"", hideClosed:true },
   cases: [],
-  currentCase: null, caseLogs: [], caseAttachments: [], caseVendorSuggestions: [], caseVendorBestMatch: [], caseVendorAutoFilled: false,
+  currentCase: null, caseLogs: [], caseAttachments: [], caseVendorSuggestions: [], caseVendorBestMatch: [], caseVendorAutoFilled: false, caseVendorHistoryMatch: [],
   accounts: [],
   vendorFormError: "",
 };
@@ -418,10 +418,14 @@ function renderCaseAttachmentsInner(){
     <p style="font-size:12px; font-weight:700; color:var(--ink-soft); margin:14px 0 6px;">${ATTACH_CATEGORY_LABEL[cat]}</p>
     <div class="attach-grid">
       ${attachByCategory[cat].map(a=>`
-        <a href="${a.file_path}" target="_blank" class="attach-item" style="text-decoration:none; color:inherit;">
-          <img src="${a.file_path}" onerror="this.style.display='none'">
-          <div class="cap">${new Date(a.uploaded_at).toLocaleDateString('zh-TW')}</div>
-        </a>`).join("")}
+        <div class="attach-item" style="position:relative;">
+          <a href="${a.file_path}" target="_blank" style="text-decoration:none; color:inherit; display:block;">
+            <img src="${a.file_path}" onerror="this.style.display='none'">
+            <div class="cap">${new Date(a.uploaded_at).toLocaleDateString('zh-TW')}</div>
+          </a>
+          <button type="button" data-action="delete-case-attachment" data-id="${a.id}"
+            style="position:absolute; top:4px; right:4px; background:rgba(193,63,63,.9); color:#fff; border:none; border-radius:5px; width:22px; height:22px; line-height:1; cursor:pointer; font-size:13px;">✕</button>
+        </div>`).join("")}
       <div class="attach-upload-btn" data-action="upload-attachment" data-category="${cat}">＋ 上傳</div>
     </div>`).join("");
 }
@@ -431,16 +435,20 @@ function renderCaseDetail(){
   if(!c) return `<div class="empty">找不到案件</div>`;
 
   const statusOptions = STATUS_GROUPS.map(g=>`<optgroup label="${g.label}">${g.options.map(o=>`<option value="${o}" ${c.status===o?'selected':''}>${STATUS_LABEL[o]}</option>`).join("")}</optgroup>`).join("");
-  const bestMatchList = state.caseVendorBestMatch || [];
-  const bestMatchIds2 = new Set(bestMatchList.map(v=>v.id));
+  const historyMatchList = state.caseVendorHistoryMatch || [];
+  const historyMatchIds2 = new Set(historyMatchList.map(v=>v.id));
+  const bestMatchList = (state.caseVendorBestMatch || []).filter(v=>!historyMatchIds2.has(v.id));
+  const bestMatchIds2 = new Set([...historyMatchIds2, ...bestMatchList.map(v=>v.id)]);
   const suggestedList = (state.caseVendorSuggestions||[]).filter(v=>!bestMatchIds2.has(v.id));
   const suggestedIds = new Set([...bestMatchIds2, ...suggestedList.map(v=>v.id)]);
+  const historyMatchOptions = historyMatchList.map(v=>`<option value="${v.id}" ${c.vendor_id===v.id?'selected':''}>${v.name}（過去處理過 ${v.count} 次）${v.vendor_type==='temporary'?'（臨時）':''}</option>`).join("");
   const bestMatchOptions = bestMatchList.map(v=>`<option value="${v.id}" ${c.vendor_id===v.id?'selected':''}>${v.category?`[${v.category}] `:''}${v.name}${v.vendor_type==='temporary'?'（臨時）':''}</option>`).join("");
   const suggestedOptions = suggestedList.map(v=>`<option value="${v.id}" ${c.vendor_id===v.id?'selected':''}>${v.category ? `[${v.category}] ` : ''}${v.name}${v.vendor_type==='temporary'?'（臨時）':''}</option>`).join("");
   const otherOptions = state.vendors.filter(v=>!suggestedIds.has(v.id)).map(v=>`<option value="${v.id}" ${c.vendor_id===v.id?'selected':''}>${v.name}${v.vendor_type==='temporary'?'（臨時）':''}</option>`).join("");
-  const vendorOptions = (bestMatchOptions ? `<optgroup label="🎯 最符合這台設備">${bestMatchOptions}</optgroup>` : "") +
+  const vendorOptions = (historyMatchOptions ? `<optgroup label="📊 這家店以前這樣處理過">${historyMatchOptions}</optgroup>` : "") +
+    (bestMatchOptions ? `<optgroup label="🎯 最符合這台設備">${bestMatchOptions}</optgroup>` : "") +
     (suggestedOptions ? `<optgroup label="⭐ 本店常用廠商">${suggestedOptions}</optgroup>` : "") +
-    `<optgroup label="${(bestMatchOptions||suggestedOptions) ? '其他廠商' : '全部廠商'}">${otherOptions}</optgroup>`;
+    `<optgroup label="${(historyMatchOptions||bestMatchOptions||suggestedOptions) ? '其他廠商' : '全部廠商'}">${otherOptions}</optgroup>`;
   const selectedVendorInfo = c.vendor_id ? state.vendors.find(v=>v.id===c.vendor_id) : null;
 
   return `
@@ -484,7 +492,7 @@ function renderCaseDetail(){
         <label class="field-label">門市自付金額</label>
         <input type="number" id="edit-store-pay" value="${c.store_pay_amount||''}">
 
-        <label class="field-label">廠商${state.caseVendorAutoFilled ? ' <span style="color:var(--ok); text-transform:none; font-weight:400;">（系統已自動帶入建議廠商，請確認後按下方儲存）</span>' : (bestMatchList.length ? ' <span style="color:var(--ok); text-transform:none; font-weight:400;">（已依設備名稱找到最相關廠商，見選單最上方）</span>' : '')}</label>
+        <label class="field-label">廠商${state.caseVendorAutoFilled ? ' <span style="color:var(--ok); text-transform:none; font-weight:400;">（系統已自動帶入建議廠商，請確認後按下方儲存）</span>' : (historyMatchList.length ? ' <span style="color:var(--ok); text-transform:none; font-weight:400;">（依這家店過去實際處理紀錄找到建議廠商）</span>' : (bestMatchList.length ? ' <span style="color:var(--ok); text-transform:none; font-weight:400;">（已依設備名稱找到最相關廠商，見選單最上方）</span>' : ''))}</label>
         <input type="text" id="vendor-search-filter" placeholder="🔍 輸入關鍵字篩選廠商…" style="margin-bottom:8px;">
         <div style="display:flex; gap:8px;">
           <select id="edit-vendor" style="flex:1;"><option value="">— 未指定 —</option>${vendorOptions}</select>
@@ -1293,6 +1301,7 @@ async function onAction(e){
   else if(action === "suggest-asset-no"){ await suggestAssetNo(); }
   else if(action === "suggest-asset-category"){ suggestAssetCategory(); }
   else if(action === "delete-asset-photo"){ await deleteAssetPhoto(el.dataset.id); }
+  else if(action === "delete-case-attachment"){ await deleteCaseAttachment(el.dataset.id); }
   else if(action === "export-assets"){ await exportAssets(); }
   else if(action === "toggle-copy-assets-panel"){ state.showCopyAssetsPanel = !state.showCopyAssetsPanel; render(); }
   else if(action === "copy-assets-from-template"){ await copyAssetsFromTemplate(); }
@@ -1889,6 +1898,7 @@ async function openCase(id){
 async function loadCaseVendorSuggestions(caseData){
   state.caseVendorSuggestions = [];
   state.caseVendorBestMatch = [];
+  state.caseVendorHistoryMatch = [];
   const storeId = caseData?.store_id;
   if(!storeId) { if(state.view==="case-detail") render(); return; }
 
@@ -1910,10 +1920,38 @@ async function loadCaseVendorSuggestions(caseData){
   const cleanTerm = (s)=> (s||"").replace(/\d+/g,"").replace(/[（(].*?[)）]/g,"").trim();
   const coreTerm = cleanTerm(searchText);
 
-  const bestMatchIds = new Set();
+  // 【經驗值學習】查這家店過去實際處理過的案件，同樣設備／類別，最後是哪個廠商修好的，統計次數排序
+  // 這比對照原始廠商指派規則表更準，因為是真實發生過的結果，會隨案件累積越用越準
+  const historyMatchIds = new Set();
+  const historyMatch = [];
+  if(coreTerm){
+    const { data: historyRows } = await sb.from("cases")
+      .select("vendor_id, fault_category, vendors(id, name, vendor_type)")
+      .eq("store_id", storeId)
+      .not("vendor_id", "is", null)
+      .neq("id", caseData.id || "00000000-0000-0000-0000-000000000000")
+      .in("status", ["repair_done","closed"]);
+    const counts = {};
+    (historyRows||[]).forEach(h=>{
+      if(!h.vendors) return;
+      const cat = cleanTerm(h.fault_category);
+      const overlap = cat.length>=2 && coreTerm.length>=2 && (cat.includes(coreTerm) || coreTerm.includes(cat) ||
+        [...Array(Math.max(coreTerm.length-1,0))].some((_,i)=> coreTerm.slice(i,i+2) && cat.includes(coreTerm.slice(i,i+2))));
+      if(!overlap) return;
+      if(!counts[h.vendor_id]) counts[h.vendor_id] = { count:0, vendor:h.vendors };
+      counts[h.vendor_id].count++;
+    });
+    Object.entries(counts).sort((a,b)=> b[1].count - a[1].count).forEach(([vid, info])=>{
+      historyMatchIds.add(vid);
+      historyMatch.push({ id:vid, name:info.vendor.name, vendor_type:info.vendor.vendor_type, count:info.count });
+    });
+  }
+
+  const bestMatchIds = new Set(historyMatchIds);
   const bestMatch = [];
   if(coreTerm){
     rules.forEach(r=>{
+      if(bestMatchIds.has(r.vendor_id)) return;
       const note = cleanTerm(r.note);
       const cat = cleanTerm(r.category);
       const targets = [note, cat].filter(Boolean);
@@ -1936,13 +1974,14 @@ async function loadCaseVendorSuggestions(caseData){
     list.push({ id:r.vendor_id, name:r.vendors.name, vendor_type:r.vendors.vendor_type, category:r.category });
   });
 
+  state.caseVendorHistoryMatch = historyMatch;
   state.caseVendorBestMatch = bestMatch;
   state.caseVendorSuggestions = list;
 
   // 案件目前還沒有指定廠商時，自動把最相關的廠商先帶入表單（還沒存檔，需要總務確認後按儲存才會生效）
   state.caseVendorAutoFilled = false;
   if(!caseData.vendor_id && state.currentCase && state.currentCase.id === caseData.id){
-    const autoPick = bestMatch[0] || list[0];
+    const autoPick = historyMatch[0] || bestMatch[0] || list[0];
     if(autoPick){
       state.currentCase.vendor_id = autoPick.id;
       state.caseVendorAutoFilled = true;
@@ -1956,6 +1995,24 @@ async function loadCaseLogs(caseId){
   const { data } = await sb.from("case_logs").select("*").eq("case_id", caseId).order("created_at", { ascending:false });
   state.caseLogs = data || [];
   if(state.view === "case-detail") render();
+}
+
+async function deleteCaseAttachment(attachmentId){
+  if(!confirm("確定要刪除這個附件嗎？")) return;
+  const item = state.caseAttachments.find(a=>a.id===attachmentId);
+  const { error } = await sb.from("attachments").delete().eq("id", attachmentId);
+  if(error){ alert("刪除失敗：" + error.message); return; }
+  try{
+    if(item?.file_path){
+      const marker = "/attachments/";
+      const idx = item.file_path.indexOf(marker);
+      if(idx >= 0){
+        const path = decodeURIComponent(item.file_path.slice(idx + marker.length));
+        await sb.storage.from("attachments").remove([path]);
+      }
+    }
+  }catch(e){ /* 檔案清理失敗不影響資料庫紀錄 */ }
+  if(state.currentCase?.id) await loadCaseAttachments(state.currentCase.id);
 }
 
 async function loadCaseAttachments(caseId){
