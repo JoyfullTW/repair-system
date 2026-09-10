@@ -216,7 +216,7 @@
     載入中…如果這段文字一直沒有消失，代表網頁程式無法執行，請截圖回報。
   </div>
 </div>
-<div class="version-badge">store build 24</div>
+<div class="version-badge">store build 25</div>
 
 <script>
 /* ============================================================
@@ -1295,7 +1295,20 @@ function advanceReportStep(){
   }
   if(s.step === 1 && !s.repairType) return;
   if(s.step === 2){
-    if(s.repairType === "asset" && !s.assetId) { alert("請先選擇資產"); return; }
+    if(s.repairType === "asset" && !s.assetId){
+      // 搜尋過但找不到資產時，直接自動轉成一般報修，不用強迫使用者一定要點那張卡片
+      const q = document.getElementById("asset-search")?.value.trim();
+      if(q){
+        s.repairType = "general";
+        s.generalCategory = "其他";
+        s.faultCategory = q;
+        s.assetId = null;
+        s.assetLabel = "";
+      } else {
+        alert("請先搜尋並選擇資產，或是清空搜尋欄位改選一般報修");
+        return;
+      }
+    }
     if(s.repairType === "general" && !s.generalCategory){ alert("請選擇報修類別"); return; }
   }
   if(s.step === 3){
