@@ -161,7 +161,7 @@
 </head>
 <body>
 <div id="app"></div>
-<div class="version-badge">admin build 30</div>
+<div class="version-badge">admin build 32</div>
 
 <script>
 /* ============================================================
@@ -222,7 +222,7 @@ let state = {
   assetFilters: { storeId:"", majorCode:"", q:"", noPhotoOnly:false }, assetPhotoCounts: {}, showCopyAssetsPanel: false,
   currentAsset: null, assetFormError: "", assetLogs: [], assetAttachments: [],
   assignmentRules: [], assignmentFilters: { storeId:"", confirmStatus:"" }, assignmentFormError: "", showCopyRulesPanel: false,
-  contacts: [], editingStoreId: null, editingContactId: null, generalCategories: [], editingVendorId: null, vendorFilterQ: "",
+  contacts: [], editingStoreId: null, editingContactId: null, generalCategories: [], otherCategoryStats: [], editingVendorId: null, vendorFilterQ: "",
   infraFilters: { storeId: "" }, infraRecords: [], infraPhotos: {}, sidebarBadges: { newCases: 0, pendingAccounts: 0 },
   manuals: [], manualFilterQ: "", manualFormError: "",
   dashboardStats: null,
@@ -475,6 +475,7 @@ function renderCaseDetail(){
         <p style="font-size:13px; color:var(--ink-soft); margin:4px 0;">現場報修人：${c.reporter_name||'—'}（${c.reporter_phone||'—'}）</p>
         <button class="btn btn-outline btn-sm" style="margin-top:10px;" data-action="copy-case-info">📋 複製案件資訊＋照片連結</button>
         <p style="font-size:11px; color:var(--ink-soft); margin-top:6px;">複製後可直接貼到 LINE 群組給廠商，照片連結不需登入即可開啟。</p>
+        <button class="btn btn-outline btn-sm" style="margin-top:14px; color:var(--err,#C13F3F); border-color:var(--err,#C13F3F);" data-action="delete-case">🗑 刪除此案件</button>
       </div>
 
       <div class="card" style="margin-top:14px;">
@@ -654,6 +655,16 @@ function renderStores(){
         <input type="text" id="new-general-category" placeholder="新類別名稱，例如：消防" style="flex:1;">
         <button class="btn btn-primary btn-sm" data-action="add-general-category">新增</button>
       </div>
+      ${(state.otherCategoryStats||[]).length ? `
+      <div style="margin-top:20px; padding-top:16px; border-top:1px solid var(--border);">
+        <p style="font-size:13px; font-weight:700; margin:0 0 8px;">💡「其他」類別裡常出現的項目</p>
+        <p style="font-size:12px; color:var(--ink-soft); margin:0 0 10px;">以下是選「其他」的報修裡，實際填寫的設備／原因出現次數最多的項目，如果某個項目一直出現，可以考慮直接新增成正式類別。</p>
+        <div style="display:flex; flex-wrap:wrap; gap:8px;">
+          ${state.otherCategoryStats.map(s=>`
+            <span class="status-pill" style="background:var(--chip-bg); cursor:pointer;" data-action="fill-general-category" data-name="${s.name}">${s.name}（${s.count} 次）</span>`).join("")}
+        </div>
+        <p style="font-size:11px; color:var(--ink-soft); margin:6px 0 0;">點一下項目會帶入上面的新增欄位，確認名稱後按新增即可。</p>
+      </div>` : ""}
     </div>
   </div>
 
@@ -1266,6 +1277,7 @@ async function onAction(e){
   else if(action === "open-case"){ await openCase(el.dataset.id); }
   else if(action === "save-case"){ await saveCase(el); }
   else if(action === "copy-case-info"){ copyCaseInfo(); }
+  else if(action === "delete-case"){ await deleteCase(); }
   else if(action === "upload-attachment"){ triggerAttachmentUpload("case", state.currentCase.id, el.dataset.category); }
   else if(action === "upload-asset-photo"){ triggerAttachmentUpload("asset", state.currentAsset.id, "asset_photo"); }
   else if(action === "quick-add-vendor"){ await quickAddVendor(); }
@@ -1309,6 +1321,10 @@ async function onAction(e){
   else if(action === "copy-rules-from-template"){ await copyRulesFromTemplate(); }
   else if(action === "reset-password"){ await resetPassword(el.dataset.id, el.dataset.name); }
   else if(action === "add-general-category"){ await addGeneralCategory(); }
+  else if(action === "fill-general-category"){
+    const input = document.getElementById("new-general-category");
+    if(input){ input.value = el.dataset.name; input.focus(); }
+  }
   else if(action === "delete-general-category"){ await deleteGeneralCategory(el.dataset.id); }
 }
 
@@ -1807,6 +1823,22 @@ async function applyCaseFilters(){
 async function loadGeneralCategories(){
   const { data } = await sb.from("general_report_categories").select("*").order("sort_order");
   state.generalCategories = data || [];
+  await loadOtherCategoryStats();
+}
+
+async function loadOtherCategoryStats(){
+  const { data } = await sb.from("cases").select("fault_category").eq("general_category","其他").not("fault_category","is",null);
+  const counts = {};
+  (data||[]).forEach(r=>{
+    const key = (r.fault_category||"").trim();
+    if(!key) return;
+    counts[key] = (counts[key]||0) + 1;
+  });
+  state.otherCategoryStats = Object.entries(counts)
+    .filter(([,count])=> count >= 2)
+    .sort((a,b)=> b[1]-a[1])
+    .slice(0, 12)
+    .map(([name,count])=> ({ name, count }));
 }
 
 async function addGeneralCategory(){
@@ -2079,6 +2111,34 @@ async function saveCase(btn){
 }
 
 function numOrNull(v){ return v === "" || v === null || v === undefined ? null : Number(v); }
+
+async function deleteCase(){
+  const c = state.currentCase;
+  if(!c) return;
+  if(!confirm(`確定要刪除案件「${c.case_no}」嗎？\n\n這個動作無法復原，處理歷程跟附件也會一併刪除。`)) return;
+
+  // 先刪附件檔案（儲存空間裡的實體檔案），再刪資料庫紀錄
+  try{
+    const { data: attachments } = await sb.from("attachments").select("file_path").eq("related_type","case").eq("related_id", c.id);
+    for(const a of (attachments||[])){
+      const marker = "/attachments/";
+      const idx = a.file_path.indexOf(marker);
+      if(idx >= 0){
+        const path = decodeURIComponent(a.file_path.slice(idx + marker.length));
+        await sb.storage.from("attachments").remove([path]);
+      }
+    }
+  }catch(e){ /* 檔案清理失敗不影響後續刪除 */ }
+
+  await sb.from("attachments").delete().eq("related_type","case").eq("related_id", c.id);
+  await sb.from("case_logs").delete().eq("case_id", c.id);
+  const { error } = await sb.from("cases").delete().eq("id", c.id);
+  if(error){ alert("刪除失敗：" + error.message); return; }
+
+  alert("✅ 已刪除此案件");
+  await loadSidebarBadgeCounts();
+  await goTo("case-list");
+}
 
 function copyCaseInfo(){
   const c = state.currentCase;
