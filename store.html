@@ -20,7 +20,7 @@
     --primary-ink:#FFFFFF;
     --urgent:#D93B30;       /* 安全警示紅：緊急 */
     --warn:#E2941A;         /* 安全警示黃：影響營運/待處理 */
-    --normal:#5C7A99;       /* 灰藍：一般 */
+    --normal:#2F8F5B;       /* 綠：一般 */
     --ok:#2C6E8E;
     --chip-bg:#E4EAF0;
     --radius:10px;
@@ -216,7 +216,7 @@
     載入中…如果這段文字一直沒有消失，代表網頁程式無法執行，請截圖回報。
   </div>
 </div>
-<div class="version-badge">store build 20</div>
+<div class="version-badge">store build 24</div>
 
 <script>
 /* ============================================================
@@ -482,7 +482,8 @@ function renderNewReport(){
           ${storeOptions}
         </select>
       ` : ""}
-      <h2 style="margin:16px 0 16px;">這是哪一種報修？</h2>
+      <h2 style="margin:16px 0 6px;">這是哪一種報修？</h2>
+      <p style="font-size:12px; color:var(--ink-soft); margin:0 0 16px;">不確定設備有沒有建檔也沒關係，先點「連結既有資產」試著搜尋，找不到的話系統會直接幫你接成一般報修，不用自己判斷、也不用重新選。</p>
       <div class="card" data-action="pick-type" data-type="asset" style="cursor:pointer; ${typeCardsDisabled?'opacity:.4; pointer-events:none;':''}">
         <strong>🧊 連結既有資產</strong>
         <p style="color:var(--ink-soft); font-size:13px; margin:6px 0 0;">冰箱、製冰機、爐具等已登記的設備</p>
@@ -527,9 +528,11 @@ function renderNewReport(){
         <span class="chip" data-level="operational" data-action="pick-urgency" data-value="operational" data-selected="${s.urgency==='operational'}">影響營運</span>
         <span class="chip" data-level="urgent" data-action="pick-urgency" data-value="urgent" data-selected="${s.urgency==='urgent'}">緊急</span>
       </div>
-      <p style="font-size:12px; color:var(--ink-soft); line-height:1.6; margin-top:10px;">
-        一般：不影響營業　／　影響營運：還能勉強運作，已造成不便　／　緊急：完全無法使用，衝擊營業或食安安全
-      </p>`;
+      <div style="font-size:12px; color:var(--ink-soft); line-height:1.8; margin-top:10px;">
+        <div><span style="color:var(--normal); font-weight:700;">●</span> 一般：不影響營業</div>
+        <div><span style="color:var(--warn); font-weight:700;">●</span> 影響營運：還能勉強運作，已造成不便</div>
+        <div><span style="color:var(--urgent); font-weight:700;">●</span> 緊急：完全無法使用，衝擊營業或食安安全</div>
+      </div>`;
   } else if(s.step === 4){
     body = `
       <h2 style="margin:4px 0 6px;">上傳照片／影片</h2>
@@ -615,6 +618,7 @@ function renderMyCases(){
       <input type="checkbox" id="my-cases-show-closed" ${showClosed?'checked':''} style="width:auto;">
       顯示已結案／取消的案件${!showClosed && closedCount>0 ? `（目前收起 ${closedCount} 筆）` : ''}
     </label>
+    <button class="btn btn-outline" data-action="print-case-list" style="width:auto; padding:0 16px; height:40px; margin-bottom:16px;">🖨 列印／匯出目前清單</button>
     ${rows.length === 0 ? `
       <div class="empty"><span class="mark">📭</span>${allRows.length===0 ? '目前沒有報修案件' : '目前沒有需要追蹤的案件，都處理完了 🎉'}</div>
     ` : rows.map(c => ticketHtml(c)).join("")}
@@ -1187,6 +1191,7 @@ async function onAction(e){
     await loadMyCases();
     render();
   }
+  else if(action === "print-case-list"){ printCaseList(); }
   else if(action === "go-manuals"){ state.manualResults = []; state.view="manuals"; render(); }
   else if(action === "search-manuals"){ await searchManuals(); }
   else if(action === "report-back"){ backReportStep(); }
@@ -1316,7 +1321,15 @@ function onAssetSearch(e){
       .or(`name.ilike.%${q}%,asset_no.ilike.%${q}%`)
       .limit(10);
     if(error){ box.innerHTML = "搜尋失敗：" + error.message; return; }
-    if(!data || data.length===0){ box.innerHTML = "找不到符合的資產"; return; }
+    if(!data || data.length===0){
+      box.innerHTML = `
+        <p style="margin:0 0 10px;">找不到符合「${q}」的資產</p>
+        <div class="card" style="padding:12px; cursor:pointer; border-color:var(--steel, var(--primary));" data-action="fallback-general" data-q="${q}">
+          <strong style="font-size:14px;">➜ 沒關係，直接用「${q}」建立一般報修</strong>
+          <p style="font-size:12px; color:var(--ink-soft); margin:4px 0 0;">不確定有沒有建檔也沒關係，直接繼續填寫故障資訊就好</p>
+        </div>`;
+      return;
+    }
     box.innerHTML = data.map(a=>`
       <div class="card" style="padding:12px; cursor:pointer;" data-pick-asset="${a.id}" data-label="${a.asset_no} ${a.name}" data-name="${a.name}">
         <strong style="font-size:14px;">${a.name}</strong>
@@ -1328,6 +1341,17 @@ function onAssetSearch(e){
         state.newReport.assetLabel = el.dataset.label;
         state.newReport.faultCategory = el.dataset.name;
         advanceReportStep();
+      });
+    });
+    box.querySelectorAll("[data-action='fallback-general']").forEach(el=>{
+      el.addEventListener("click", ()=>{
+        state.newReport.repairType = "general";
+        state.newReport.generalCategory = "其他";
+        state.newReport.faultCategory = el.dataset.q;
+        state.newReport.assetId = null;
+        state.newReport.assetLabel = "";
+        state.newReport.step = 3;
+        render();
       });
     });
   }, 300);
@@ -1375,6 +1399,50 @@ async function submitReport(){
   state.currentCase = data;
   state.view = "new-report-success";
   render();
+}
+
+function printCaseList(){
+  const allRows = state.cases;
+  const showClosed = state.myCasesShowClosed;
+  const rows = showClosed ? allRows : allRows.filter(c=> !["closed","cancelled"].includes(c.status));
+  if(rows.length === 0){ alert("目前沒有資料可以列印"); return; }
+
+  const now = new Date().toLocaleString('zh-TW');
+  const html = `<!DOCTYPE html><html lang="zh-Hant"><head><meta charset="UTF-8">
+    <title>報修案件清單</title>
+    <style>
+      body{ font-family:"Noto Sans TC", sans-serif; padding:24px; color:#1E2A32; }
+      h1{ font-size:18px; margin:0 0 4px; }
+      .meta{ font-size:12px; color:#6B7B85; margin-bottom:16px; }
+      table{ width:100%; border-collapse:collapse; font-size:13px; }
+      th, td{ border:1px solid #ccc; padding:6px 8px; text-align:left; vertical-align:top; }
+      th{ background:#f4f7f9; }
+      tr[data-urgent="1"] td:first-child{ border-left:4px solid #C13F3F; }
+      @media print{ body{ padding:8px; } }
+    </style></head><body>
+    <h1>報修案件清單</h1>
+    <div class="meta">列印時間：${now}　共 ${rows.length} 筆${showClosed?'（含已結案／取消）':'（不含已結案／取消）'}</div>
+    <table>
+      <thead><tr><th>案件編號</th><th>門市</th><th>設備／類別</th><th>緊急</th><th>目前狀態</th><th>建立時間</th></tr></thead>
+      <tbody>
+        ${rows.map(c=>`
+          <tr data-urgent="${c.urgency==='urgent'?1:0}">
+            <td>#${c.case_no}</td>
+            <td>${c.store_name||''}</td>
+            <td>${c.fault_category||c.general_category||''}</td>
+            <td>${URGENCY_LABEL[c.urgency]||''}</td>
+            <td>${STATUS_LABEL[c.status]||c.status}</td>
+            <td>${new Date(c.created_at).toLocaleDateString('zh-TW')}</td>
+          </tr>`).join("")}
+      </tbody>
+    </table>
+  </body></html>`;
+
+  const printWin = window.open("", "_blank");
+  if(!printWin){ alert("瀏覽器擋住了彈出視窗，請允許彈出視窗後再試一次"); return; }
+  printWin.document.write(html);
+  printWin.document.close();
+  printWin.onload = () => printWin.print();
 }
 
 async function loadMyCases(){
