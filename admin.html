@@ -161,7 +161,7 @@
 </head>
 <body>
 <div id="app"></div>
-<div class="version-badge">admin build 32</div>
+<div class="version-badge">admin build 33</div>
 
 <script>
 /* ============================================================
@@ -383,6 +383,7 @@ function renderCaseList(){
       <option value="normal" ${f.urgency==='normal'?'selected':''}>一般</option>
     </select>
     <button class="btn btn-outline btn-sm" data-action="apply-case-filters">套用篩選</button>
+    <button class="btn btn-outline btn-sm" data-action="print-case-list">🖨 列印／匯出目前清單</button>
     <label style="display:flex; align-items:center; gap:6px; font-size:13px; white-space:nowrap;">
       <input type="checkbox" id="filter-show-closed" ${f.hideClosed?'':'checked'} style="width:auto;"> 顯示已結案／取消的案件
     </label>
@@ -1274,6 +1275,7 @@ async function onAction(e){
     await goTo(view);
   }
   else if(action === "apply-case-filters"){ applyCaseFilters(); }
+  else if(action === "print-case-list"){ printCaseListAdmin(); }
   else if(action === "open-case"){ await openCase(el.dataset.id); }
   else if(action === "save-case"){ await saveCase(el); }
   else if(action === "copy-case-info"){ copyCaseInfo(); }
@@ -1786,6 +1788,53 @@ async function loadDashboard(){
     }
   });
   state.dashboardStats = stats;
+}
+
+function printCaseListAdmin(){
+  const rows = state.cases;
+  if(rows.length === 0){ alert("目前沒有資料可以列印"); return; }
+
+  const now = new Date().toLocaleString('zh-TW');
+  const f = state.caseFilters;
+  const html = `<!DOCTYPE html><html lang="zh-Hant"><head><meta charset="UTF-8">
+    <title>報修案件清單</title>
+    <style>
+      body{ font-family:"Noto Sans TC", sans-serif; padding:24px; color:#1E2A32; }
+      h1{ font-size:18px; margin:0 0 4px; }
+      .meta{ font-size:12px; color:#6B7B85; margin-bottom:16px; }
+      table{ width:100%; border-collapse:collapse; font-size:12px; }
+      th, td{ border:1px solid #ccc; padding:6px 8px; text-align:left; vertical-align:top; }
+      th{ background:#f4f7f9; }
+      tr[data-urgent="1"] td:first-child{ border-left:4px solid #C13F3F; }
+      @media print{ body{ padding:8px; } }
+    </style></head><body>
+    <h1>報修案件清單</h1>
+    <div class="meta">列印時間：${now}　共 ${rows.length} 筆${f.hideClosed && !f.status ? '（不含已結案／取消）' : ''}</div>
+    <table>
+      <thead><tr><th>案件編號</th><th>門市</th><th>設備／類別</th><th>緊急</th><th>目前狀態</th><th>指派廠商</th><th>建立時間</th></tr></thead>
+      <tbody>
+        ${rows.map(c=>{
+          const vendor = state.vendors.find(v=>v.id===c.vendor_id);
+          return `
+          <tr data-urgent="${c.urgency==='urgent'?1:0}">
+            <td>#${c.case_no}</td>
+            <td>${c.store_name||''}</td>
+            <td>${c.fault_category||c.general_category||''}</td>
+            <td>${URGENCY_LABEL[c.urgency]||''}</td>
+            <td>${STATUS_LABEL[c.status]||c.status}</td>
+            <td>${vendor ? vendor.name : '—'}</td>
+            <td>${new Date(c.created_at).toLocaleDateString('zh-TW')}</td>
+          </tr>`;
+        }).join("")}
+      </tbody>
+    </table>
+  </body></html>`;
+
+  const printWin = window.open("", "_blank");
+  if(!printWin){ alert("瀏覽器擋住了彈出視窗，請允許彈出視窗後再試一次"); return; }
+  printWin.document.write(html);
+  printWin.document.close();
+  printWin.onload = () => printWin.print();
 }
 
 async function loadCases(){
