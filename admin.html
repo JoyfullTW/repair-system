@@ -161,7 +161,7 @@
 </head>
 <body>
 <div id="app"></div>
-<div class="version-badge">admin build 34</div>
+<div class="version-badge">admin build 36</div>
 
 <script>
 /* ============================================================
@@ -203,6 +203,8 @@ const STATUS_GROUPS = [
   { label:"待確認／完成", options:["pending_store_confirm","repair_done"] },
   { label:"結束", options:["closed","cancelled"] },
 ];
+// 「已聯絡廠商之後」的逾期提醒範圍：沿用「處理中」分組，不含待受理（新案件/資料待補）與已結束案件
+const OVERDUE_ELIGIBLE_STATUSES = STATUS_GROUPS[1].options;
 const ROLE_LABEL = { store:"門市人員", general_affairs:"總務人員", district_manager:"區經理", admin:"系統管理者" };
 const ATTACH_CATEGORY_LABEL = {
   fault_photo_video:"故障照片/影片", after_repair_photo:"維修後照片", receipt:"回執單/簽收單",
@@ -223,7 +225,8 @@ let state = {
   currentAsset: null, assetFormError: "", assetLogs: [], assetAttachments: [],
   assignmentRules: [], assignmentFilters: { storeId:"", confirmStatus:"" }, assignmentFormError: "", showCopyRulesPanel: false,
   contacts: [], editingStoreId: null, editingContactId: null, generalCategories: [], otherCategoryStats: [], editingVendorId: null, vendorFilterQ: "",
-  infraFilters: { storeId: "" }, infraRecords: [], infraPhotos: {}, sidebarBadges: { newCases: 0, pendingAccounts: 0 },
+  infraFilters: { storeId: "" }, infraRecords: [], infraPhotos: {}, sidebarBadges: { newCases: 0, pendingAccounts: 0, overdueCases: 0 },
+  overdueDays: 2,
   manuals: [], manualFilterQ: "", manualFormError: "",
   dashboardStats: null,
   caseFilters: { status:"", storeId:"", urgency:"", q:"", hideClosed:true },
@@ -281,7 +284,7 @@ function renderSidebar(){
   const badges = state.sidebarBadges || {};
   const items = [
     { key:"dashboard", label:"Dashboard", ico:"📊" },
-    { key:"case-list", label:"案件列表", ico:"📋", badge: badges.newCases },
+    { key:"case-list", label:"案件列表", ico:"📋", badge: (badges.newCases||0) + (badges.overdueCases||0) },
     { key:"assets", label:"資產管理", ico:"🧊" },
     { key:"stores", label:"門市管理", ico:"🏬" },
     { key:"contacts", label:"通訊錄", ico:"📇" },
@@ -346,9 +349,18 @@ function renderDashboard(){
     { key:"pending_confirm", label:"待門市確認", n:st.pendingConfirm, tone:"" },
     { key:"urgent", label:"緊急案件", n:st.urgent, tone:"urgent" },
     { key:"repeat", label:"重複故障", n:st.repeat, tone:"urgent" },
-    { key:"overdue", label:"逾期未更新", n:st.overdue, tone:"warn" },
+    { key:"overdue", label:"逾期未更新（廠商追蹤）", n:st.overdue, tone:"warn" },
   ];
   return `
+  ${st.overdue > 0 ? `
+  <div class="card stat-card" data-action="nav" data-view="case-list" data-quick="overdue" data-tone="warn"
+       style="cursor:pointer; margin-bottom:16px; display:flex; align-items:center; justify-content:space-between; background:#FBF0DD; border-color:var(--warn,#B8860B);">
+    <div>
+      <div style="font-weight:700; font-size:14px;">⚠️ 有 ${st.overdue} 筆案件已聯絡廠商後超過 ${state.overdueDays} 天沒有更新</div>
+      <div style="font-size:12px; color:var(--ink-soft); margin-top:2px;">點這裡查看清單，記得追蹤廠商進度</div>
+    </div>
+    <div style="font-size:20px;">›</div>
+  </div>` : ""}
   <div class="grid grid-4">
     ${cards.map(c=>`
       <div class="card stat-card" data-tone="${c.tone}" data-action="nav" data-view="case-list" data-quick="${c.key}">
@@ -388,7 +400,7 @@ function renderCaseList(){
       <input type="checkbox" id="filter-show-closed" ${f.hideClosed?'':'checked'} style="width:auto;"> 顯示已結案／取消的案件
     </label>
   </div>
-  ${f.hideClosed && !f.status ? `<p style="font-size:12px; color:var(--ink-soft); margin:-6px 0 12px;">💡 已結案、已取消的案件預設不顯示，只列出還需要處理的。勾選上方選項可以看到全部。</p>` : ""}
+  ${f.overdueOnly ? `<p style="font-size:12px; color:var(--warn,#B8860B); margin:-6px 0 12px; font-weight:700;">⚠️ 目前只顯示「已聯絡廠商後超過 ${state.overdueDays} 天未更新」的案件，套用篩選或搜尋會離開這個檢視。</p>` : (f.hideClosed && !f.status ? `<p style="font-size:12px; color:var(--ink-soft); margin:-6px 0 12px;">💡 已結案、已取消的案件預設不顯示，只列出還需要處理的。勾選上方選項可以看到全部。</p>` : "")}
   <div class="card" style="padding:0; overflow-x:auto;">
     <table>
       <thead><tr>
@@ -1168,14 +1180,14 @@ function renderAssignmentRules(){
           <tr data-rule-row="${r.id}">
             <td><input type="text" data-field="note" value="${r.note||''}" style="min-width:180px;" placeholder="例如：洗碗機"></td>
             <td>
-              <select data-field="vendor_id" style="min-width:140px;">
+              <select data-field="vendor_id" style="min-width:150px;">
                 ${vendorOptions.replace(`value="${r.vendor_id}"`, `value="${r.vendor_id}" selected`)}
               </select>
             </td>
-            <td><input type="text" data-field="category" value="${r.category||''}" style="width:90px;" placeholder="空調"></td>
-            <td><input type="number" data-field="priority" value="${r.priority||1}" style="width:60px;"></td>
+            <td><input type="text" data-field="category" value="${r.category||''}" style="min-width:100px;" placeholder="空調"></td>
+            <td><input type="number" data-field="priority" value="${r.priority||1}" style="min-width:70px;"></td>
             <td>
-              <select data-field="confirm_status">
+              <select data-field="confirm_status" style="min-width:110px;">
                 <option value="pending" ${r.confirm_status==='pending'?'selected':''}>待確認</option>
                 <option value="confirmed" ${r.confirm_status==='confirmed'?'selected':''}>已確認</option>
               </select>
@@ -1363,8 +1375,20 @@ async function afterLogin(){
   await loadStores();
   await loadRegions();
   await loadVendors();
+  await loadSystemSettings();
   await loadSidebarBadgeCounts();
   await goTo("dashboard");
+}
+
+async function loadSystemSettings(){
+  try{
+    const { data } = await sb.from("system_settings").select("value").eq("key","overdue_days_threshold").maybeSingle();
+    if(data && data.value != null && !isNaN(Number(data.value))) state.overdueDays = Number(data.value);
+  }catch(e){ /* 讀取失敗就用預設值 2 天 */ }
+}
+
+function overdueCutoffIso(){
+  return new Date(Date.now() - state.overdueDays*24*60*60*1000).toISOString();
 }
 
 async function loadSidebarBadgeCounts(){
@@ -1375,6 +1399,13 @@ async function loadSidebarBadgeCounts(){
       sb.from("cases").select("id", { count:"exact", head:true }).eq("status","new")
     );
     state.sidebarBadges.newCases = newCases || 0;
+
+    const { count: overdueCases } = await scopedCaseQuery(
+      sb.from("cases").select("id", { count:"exact", head:true })
+        .in("status", OVERDUE_ELIGIBLE_STATUSES)
+        .lt("updated_at", overdueCutoffIso())
+    );
+    state.sidebarBadges.overdueCases = overdueCases || 0;
 
     if(["general_affairs","admin"].includes(p.role)){
       const { count: pendingAccounts } = await sb.from("users_profile").select("id", { count:"exact", head:true }).eq("status","disabled");
@@ -1766,7 +1797,7 @@ async function loadDashboard(){
   const monthStart = new Date(); monthStart.setDate(1);
   const monthStartStr = monthStart.toISOString().slice(0,10);
 
-  let q = scopedCaseQuery(sb.from("cases").select("status, urgency, repeat_fault, created_at, final_amount, closed_at"));
+  let q = scopedCaseQuery(sb.from("cases").select("status, urgency, repeat_fault, created_at, final_amount, closed_at, updated_at"));
   const { data: allCases, error } = await q;
   if(error){ console.error(error); return; }
 
@@ -1774,6 +1805,8 @@ async function loadDashboard(){
 
   const stats = { today:0, pending:0, pendingInfo:0, inProgress:0, pendingConfirm:0, urgent:0, repeat:0, overdue:0, monthClosed:0, monthCost:0, pendingAccounts: pendingAccounts||0 };
   const inProgressSet = new Set(STATUS_GROUPS[1].options);
+  const overdueEligibleSet = new Set(OVERDUE_ELIGIBLE_STATUSES);
+  const overdueCutoff = overdueCutoffIso();
   (allCases||[]).forEach(c=>{
     if(c.created_at && c.created_at.slice(0,10) === todayStr) stats.today++;
     if(["new","pending_review"].includes(c.status)) stats.pending++;
@@ -1782,6 +1815,7 @@ async function loadDashboard(){
     if(c.status === "pending_store_confirm") stats.pendingConfirm++;
     if(c.urgency === "urgent" && !["closed","cancelled"].includes(c.status)) stats.urgent++;
     if(c.repeat_fault && !["closed","cancelled"].includes(c.status)) stats.repeat++;
+    if(overdueEligibleSet.has(c.status) && c.updated_at && c.updated_at < overdueCutoff) stats.overdue++;
     if(c.status === "closed" && c.closed_at && c.closed_at.slice(0,10) >= monthStartStr){
       stats.monthClosed++;
       stats.monthCost += Number(c.final_amount) || 0;
@@ -1841,8 +1875,12 @@ async function loadCases(){
   const f = state.caseFilters;
   let q = scopedCaseQuery(sb.from("cases").select("*, stores(name)").order("created_at", { ascending:false }).limit(200));
   if(f.storeId) q = q.eq("store_id", f.storeId);
-  if(f.status) q = q.eq("status", f.status);
-  else if(f.hideClosed) q = q.not("status", "in", "(closed,cancelled)");
+  if(f.overdueOnly){
+    q = q.in("status", OVERDUE_ELIGIBLE_STATUSES).lt("updated_at", overdueCutoffIso());
+  } else {
+    if(f.status) q = q.eq("status", f.status);
+    else if(f.hideClosed) q = q.not("status", "in", "(closed,cancelled)");
+  }
   if(f.urgency) q = q.eq("urgency", f.urgency);
   if(f.q) q = q.ilike("case_no", `%${f.q}%`);
   const { data, error } = await q;
@@ -1851,11 +1889,12 @@ async function loadCases(){
 }
 
 function applyQuickFilter(key){
-  const f = { status:"", storeId:"", urgency:"", q:"", hideClosed:true };
+  const f = { status:"", storeId:"", urgency:"", q:"", hideClosed:true, overdueOnly:false };
   if(key === "pending") f.status = "new";
   if(key === "pending_info") f.status = "pending_info";
   if(key === "pending_confirm") f.status = "pending_store_confirm";
   if(key === "urgent") f.urgency = "urgent";
+  if(key === "overdue") f.overdueOnly = true;
   state.caseFilters = f;
 }
 
@@ -1865,6 +1904,7 @@ async function applyCaseFilters(){
   state.caseFilters.urgency = document.getElementById("filter-urgency")?.value || "";
   state.caseFilters.q = document.getElementById("filter-q")?.value || "";
   state.caseFilters.hideClosed = !(document.getElementById("filter-show-closed")?.checked);
+  state.caseFilters.overdueOnly = false; // 手動套用篩選時，離開「只看逾期」快速篩選
   await loadCases();
   render();
 }
