@@ -161,7 +161,7 @@
 </head>
 <body>
 <div id="app"></div>
-<div class="version-badge">admin build 40</div>
+<div class="version-badge">admin build 41</div>
 
 <script>
 /* ============================================================
@@ -421,12 +421,14 @@ function renderCaseList(){
     </select>
     <button class="btn btn-outline btn-sm" data-action="apply-case-filters">套用篩選</button>
     <button class="btn btn-outline btn-sm" data-action="print-case-list">🖨 列印／匯出目前清單</button>
-    <label style="display:flex; align-items:center; gap:6px; font-size:13px; white-space:nowrap;">
-      <input type="checkbox" id="filter-show-closed" ${f.hideClosed?'':'checked'} style="width:auto;"> 顯示已結案／取消的案件
+  </div>
+  <div style="display:flex; flex-wrap:wrap; gap:20px; align-items:center; margin:-6px 0 14px; padding:10px 12px; background:var(--surface-soft, #F4F6F7); border-radius:8px;">
+    <label style="display:inline-flex; align-items:center; gap:6px; font-size:13px; white-space:nowrap; margin:0;">
+      <input type="checkbox" id="filter-show-closed" ${f.hideClosed?'':'checked'} style="width:auto; margin:0;"> 顯示已結案／取消的案件
     </label>
     ${state.profile?.role === 'admin' ? `
-    <label style="display:flex; align-items:center; gap:6px; font-size:13px; white-space:nowrap; color:var(--err,#C13F3F);">
-      <input type="checkbox" id="filter-show-archived" ${f.showArchived?'checked':''} style="width:auto;"> 🗄 只看已封存案件
+    <label style="display:inline-flex; align-items:center; gap:6px; font-size:13px; white-space:nowrap; color:var(--err,#C13F3F); margin:0;">
+      <input type="checkbox" id="filter-show-archived" ${f.showArchived?'checked':''} style="width:auto; margin:0;"> 🗄 只看已封存案件
     </label>` : ``}
   </div>
   ${f.showArchived ? `<p style="font-size:12px; color:var(--err,#C13F3F); margin:-6px 0 12px; font-weight:700;">🗄 目前只顯示「已封存」的案件（一般人看不到這些），可進入案件詳情還原。</p>` :
