@@ -161,7 +161,7 @@
 </head>
 <body>
 <div id="app"></div>
-<div class="version-badge">admin build 41</div>
+<div class="version-badge">admin build 42</div>
 
 <script>
 /* ============================================================
@@ -555,6 +555,7 @@ function renderCaseDetail(){
           <option value="store_pay" ${c.handling_method==='store_pay'?'selected':''}>門市自付</option>
           <option value="vendor" ${c.handling_method==='vendor'?'selected':''}>委外廠商</option>
           <option value="internal" ${c.handling_method==='internal'?'selected':''}>總務內部處理</option>
+          <option value="store_resolved" ${c.handling_method==='store_resolved'?'selected':''}>門市自行排除</option>
         </select>
         <label class="field-label">門市自付金額</label>
         <input type="number" id="edit-store-pay" value="${c.store_pay_amount||''}">
