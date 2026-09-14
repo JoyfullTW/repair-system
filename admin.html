@@ -161,7 +161,7 @@
 </head>
 <body>
 <div id="app"></div>
-<div class="version-badge">admin build 36</div>
+<div class="version-badge">admin build 40</div>
 
 <script>
 /* ============================================================
@@ -205,7 +205,11 @@ const STATUS_GROUPS = [
 ];
 // 「已聯絡廠商之後」的逾期提醒範圍：沿用「處理中」分組，不含待受理（新案件/資料待補）與已結束案件
 const OVERDUE_ELIGIBLE_STATUSES = STATUS_GROUPS[1].options;
-const ROLE_LABEL = { store:"門市人員", general_affairs:"總務人員", district_manager:"區經理", admin:"系統管理者" };
+const ROLE_LABEL = { store:"門市人員", general_affairs:"總務人員", general_affairs_supervisor:"總務主管", district_manager:"區經理", admin:"系統管理者" };
+function requireAdmin(actionLabel){
+  if(state.profile?.role !== "admin"){ alert(`只有系統管理者可以${actionLabel}`); return false; }
+  return true;
+}
 const ATTACH_CATEGORY_LABEL = {
   fault_photo_video:"故障照片/影片", after_repair_photo:"維修後照片", receipt:"回執單/簽收單",
   quote:"報價單", invoice:"維修單/發票", other:"其他文件", approval_doc:"簽呈文件"
@@ -229,9 +233,10 @@ let state = {
   overdueDays: 2,
   manuals: [], manualFilterQ: "", manualFormError: "",
   dashboardStats: null,
-  caseFilters: { status:"", storeId:"", urgency:"", q:"", hideClosed:true },
+  caseFilters: { status:"", storeId:"", urgency:"", q:"", hideClosed:true, overdueOnly:false, showArchived:false, vendorId:"" },
   cases: [],
   currentCase: null, caseLogs: [], caseAttachments: [], caseVendorSuggestions: [], caseVendorBestMatch: [], caseVendorAutoFilled: false, caseVendorHistoryMatch: [],
+  showArchiveConfirm: false,
   accounts: [],
   vendorFormError: "",
 };
@@ -241,6 +246,7 @@ const app = document.getElementById("app");
 function render(){
   if(!sb){ app.innerHTML = configWarning(); return; }
   if(state.view === "login"){ app.innerHTML = renderLogin(); bindEvents(); return; }
+  if(state.view === "role-blocked"){ app.innerHTML = renderRoleBlocked(); bindEvents(); return; }
 
   app.innerHTML = `
   <div class="shell">
@@ -279,9 +285,26 @@ function renderLogin(){
   </div></div>`;
 }
 
+function renderRoleBlocked(){
+  const roleText = ROLE_LABEL[state.profile?.role] || state.profile?.role || "";
+  return `
+  <div class="login-wrap"><div class="login-box">
+    <div class="login-mark">🚧</div>
+    <h1 class="login-title">此帳號不使用這個後台</h1>
+    <p class="login-tag">Facility &amp; Repair Ops · 總務端</p>
+    <div class="card">
+      <p style="font-size:14px; margin:0 0 10px;">你的帳號角色是「${roleText}」，這個桌機後台(admin.html)只開放給總務人員與系統管理者使用。</p>
+      <p style="font-size:13px; color:var(--ink-soft); margin:0 0 16px;">請改用手機報修系統(store.html)——${state.profile?.role === 'district_manager' ? '登入後可以看到你負責轄區內所有門市的報修案件與進度總覽。' : '報修、查詢進度、查說明書都在裡面。'}</p>
+      <a class="btn btn-primary" style="width:100%; text-align:center; display:block; text-decoration:none;" href="./store.html">前往 store.html</a>
+      <div style="margin-top:12px;"><span class="logout-link" data-action="do-logout">登出</span></div>
+    </div>
+  </div></div>`;
+}
+
 /* ---------------- 側邊欄 ---------------- */
 function renderSidebar(){
   const badges = state.sidebarBadges || {};
+  const canManageAccounts = ["general_affairs_supervisor","admin"].includes(state.profile?.role);
   const items = [
     { key:"dashboard", label:"Dashboard", ico:"📊" },
     { key:"case-list", label:"案件列表", ico:"📋", badge: (badges.newCases||0) + (badges.overdueCases||0) },
@@ -290,7 +313,7 @@ function renderSidebar(){
     { key:"contacts", label:"通訊錄", ico:"📇" },
     { key:"infrastructure", label:"門市基礎設施", ico:"🔌" },
     { key:"manuals", label:"設備說明書", ico:"📖" },
-    { key:"accounts", label:"帳號管理", ico:"👤", badge: badges.pendingAccounts },
+    ...(canManageAccounts ? [{ key:"accounts", label:"帳號管理", ico:"👤", badge: badges.pendingAccounts }] : []),
     { key:"vendors", label:"廠商管理", ico:"🧰" },
     { key:"assignment-rules", label:"廠商指派規則", ico:"🗂️" },
   ];
@@ -331,7 +354,7 @@ function renderViewBody(){
   if(state.view === "contacts") return renderContacts();
   if(state.view === "infrastructure") return renderInfrastructure();
   if(state.view === "manuals") return renderManuals();
-  if(state.view === "accounts") return renderAccounts();
+  if(state.view === "accounts") return ["general_affairs_supervisor","admin"].includes(state.profile?.role) ? renderAccounts() : `<div class="empty">你沒有權限查看這個頁面</div>`;
   if(state.view === "vendors") return renderVendors();
   if(state.view === "assignment-rules") return renderAssignmentRules();
   return "";
@@ -381,6 +404,7 @@ function renderCaseList(){
   const f = state.caseFilters;
   const storeOptions = state.stores.filter(s=>s.status==='active').map(s=>`<option value="${s.id}" ${f.storeId===s.id?'selected':''}>${s.code?('['+s.code+'] '):''}${s.name}</option>`).join("");
   const statusOptions = STATUS_GROUPS.map(g=>`<optgroup label="${g.label}">${g.options.map(o=>`<option value="${o}" ${f.status===o?'selected':''}>${STATUS_LABEL[o]}</option>`).join("")}</optgroup>`).join("");
+  const vendorOptions = [...state.vendors].sort((a,b)=>(a.name||'').localeCompare(b.name||'')).map(v=>`<option value="${v.id}" ${f.vendorId===v.id?'selected':''}>${v.name}</option>`).join("");
 
   const rows = state.cases;
   return `
@@ -388,6 +412,7 @@ function renderCaseList(){
     <input type="text" id="filter-q" placeholder="搜尋案件編號…" value="${f.q}">
     <select id="filter-store"><option value="">全部門市</option>${storeOptions}</select>
     <select id="filter-status"><option value="">全部狀態</option>${statusOptions}</select>
+    <select id="filter-vendor"><option value="">全部廠商</option>${vendorOptions}</select>
     <select id="filter-urgency">
       <option value="">全部緊急程度</option>
       <option value="urgent" ${f.urgency==='urgent'?'selected':''}>緊急</option>
@@ -399,8 +424,14 @@ function renderCaseList(){
     <label style="display:flex; align-items:center; gap:6px; font-size:13px; white-space:nowrap;">
       <input type="checkbox" id="filter-show-closed" ${f.hideClosed?'':'checked'} style="width:auto;"> 顯示已結案／取消的案件
     </label>
+    ${state.profile?.role === 'admin' ? `
+    <label style="display:flex; align-items:center; gap:6px; font-size:13px; white-space:nowrap; color:var(--err,#C13F3F);">
+      <input type="checkbox" id="filter-show-archived" ${f.showArchived?'checked':''} style="width:auto;"> 🗄 只看已封存案件
+    </label>` : ``}
   </div>
-  ${f.overdueOnly ? `<p style="font-size:12px; color:var(--warn,#B8860B); margin:-6px 0 12px; font-weight:700;">⚠️ 目前只顯示「已聯絡廠商後超過 ${state.overdueDays} 天未更新」的案件，套用篩選或搜尋會離開這個檢視。</p>` : (f.hideClosed && !f.status ? `<p style="font-size:12px; color:var(--ink-soft); margin:-6px 0 12px;">💡 已結案、已取消的案件預設不顯示，只列出還需要處理的。勾選上方選項可以看到全部。</p>` : "")}
+  ${f.showArchived ? `<p style="font-size:12px; color:var(--err,#C13F3F); margin:-6px 0 12px; font-weight:700;">🗄 目前只顯示「已封存」的案件（一般人看不到這些），可進入案件詳情還原。</p>` :
+    f.vendorId ? `<p style="font-size:12px; color:var(--accent,#2C6E8E); margin:-6px 0 12px; font-weight:700;">🧰 目前只顯示指派給「${(state.vendors.find(v=>v.id===f.vendorId)||{}).name||''}」的案件，跨所有門市。</p>` :
+    f.overdueOnly ? `<p style="font-size:12px; color:var(--warn,#B8860B); margin:-6px 0 12px; font-weight:700;">⚠️ 目前只顯示「已聯絡廠商後超過 ${state.overdueDays} 天未更新」的案件，套用篩選或搜尋會離開這個檢視。</p>` : (f.hideClosed && !f.status ? `<p style="font-size:12px; color:var(--ink-soft); margin:-6px 0 12px;">💡 已結案、已取消的案件預設不顯示，只列出還需要處理的。勾選上方選項可以看到全部。</p>` : "")}
   <div class="card" style="padding:0; overflow-x:auto;">
     <table>
       <thead><tr>
@@ -413,7 +444,7 @@ function renderCaseList(){
             <td>${c.store_name||''}</td>
             <td>${c.fault_category||c.general_category||''}${c.repeat_fault?' <span class="repeat-badge">重複</span>':''}</td>
             <td><span class="status-pill" data-urgency="${c.urgency}">${URGENCY_LABEL[c.urgency]||''}</span></td>
-            <td><span class="status-pill">${STATUS_LABEL[c.status]||c.status}</span></td>
+            <td><span class="status-pill">${STATUS_LABEL[c.status]||c.status}</span>${c.deleted_at ? ' <span class="repeat-badge" style="background:#C13F3F;">🗄 已封存</span>' : ''}</td>
             <td class="mono" style="font-size:12px; color:var(--ink-soft);">${new Date(c.created_at).toLocaleString('zh-TW',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'})}</td>
             <td>›</td>
           </tr>`).join("")}
@@ -488,7 +519,27 @@ function renderCaseDetail(){
         <p style="font-size:13px; color:var(--ink-soft); margin:4px 0;">現場報修人：${c.reporter_name||'—'}（${c.reporter_phone||'—'}）</p>
         <button class="btn btn-outline btn-sm" style="margin-top:10px;" data-action="copy-case-info">📋 複製案件資訊＋照片連結</button>
         <p style="font-size:11px; color:var(--ink-soft); margin-top:6px;">複製後可直接貼到 LINE 群組給廠商，照片連結不需登入即可開啟。</p>
-        <button class="btn btn-outline btn-sm" style="margin-top:14px; color:var(--err,#C13F3F); border-color:var(--err,#C13F3F);" data-action="delete-case">🗑 刪除此案件</button>
+        ${c.deleted_at ? `
+        <div style="margin-top:14px; padding:10px; border:1px solid var(--err,#C13F3F); border-radius:8px; background:#FBEAEA;">
+          <p style="font-size:12px; color:var(--err,#C13F3F); font-weight:700; margin:0 0 4px;">🗄 此案件已封存</p>
+          <p style="font-size:11px; color:var(--ink-soft); margin:0;">封存時間：${new Date(c.deleted_at).toLocaleString('zh-TW')}</p>
+          ${state.profile?.role === 'admin' ? `<button class="btn btn-outline btn-sm" style="margin-top:8px;" data-action="restore-case">↩️ 取消封存（還原）</button>` : ``}
+        </div>` : (state.profile?.role === 'admin' ? `
+        <div style="margin-top:14px;">
+          ${!state.showArchiveConfirm ? `
+          <button class="btn btn-outline btn-sm" style="color:var(--err,#C13F3F); border-color:var(--err,#C13F3F);" data-action="start-archive-case">🗄 封存此案件</button>
+          ` : `
+          <div style="padding:10px; border:1px solid var(--err,#C13F3F); border-radius:8px; background:#FBEAEA;">
+            <p style="font-size:12px; color:var(--err,#C13F3F); font-weight:700; margin:0 0 6px;">⚠️ 確認封存「#${c.case_no}」？</p>
+            <p style="font-size:11px; color:var(--ink-soft); margin:0 0 8px;">封存後不會出現在一般案件列表，但資料完整保留、管理者可隨時還原。請在下方輸入完整案件編號「${c.case_no}」以確認：</p>
+            <input type="text" id="archive-confirm-input" placeholder="輸入 ${c.case_no}" style="margin-bottom:8px;">
+            <div style="display:flex; gap:8px;">
+              <button class="btn btn-sm" style="background:var(--err,#C13F3F); color:#fff; border-color:var(--err,#C13F3F);" data-action="confirm-archive-case">確認封存</button>
+              <button class="btn btn-outline btn-sm" data-action="cancel-archive-case">取消</button>
+            </div>
+          </div>
+          `}
+        </div>` : ``)}
       </div>
 
       <div class="card" style="margin-top:14px;">
@@ -542,10 +593,17 @@ function renderCaseDetail(){
           <option value="small" ${c.approval_type==='small'?'selected':''}>小簽呈（3萬以內）</option>
           <option value="large" ${c.approval_type==='large'?'selected':''}>大簽呈（3萬以上，送日本）</option>
         </select>
+        ${["general_affairs_supervisor","admin"].includes(state.profile?.role) ? `
         <div class="checkbox-row"><input type="checkbox" id="edit-manager-approved" ${c.manager_approved?'checked':''}><label for="edit-manager-approved">已獲協理同意</label></div>
         <label class="field-label">同意備註</label>
         <input type="text" id="edit-manager-note" value="${c.manager_approved_note||''}" placeholder="例如：8/28 電話確認">
+        ` : `
+        <div class="checkbox-row"><input type="checkbox" disabled ${c.manager_approved?'checked':''}><label>已獲協理同意${c.manager_approved ? '' : '（尚未核准，只有總務主管／系統管理者能核准）'}</label></div>
+        ${c.manager_approved_note ? `<p style="font-size:12px; color:var(--ink-soft); margin:4px 0 0;">同意備註：${c.manager_approved_note}</p>` : ``}
+        `}
       </div>
+      <input type="hidden" id="edit-manager-approved-readonly" value="${c.manager_approved ? '1' : '0'}">
+      <input type="hidden" id="edit-manager-note-readonly" value="${(c.manager_approved_note||'').replace(/"/g,'&quot;')}">
 
       <div class="card" style="margin-top:14px;">
         <label class="field-label">本次更新備註（會記錄到處理歷程）</label>
@@ -623,16 +681,20 @@ function renderAccounts(){
 
 /* ---------------- 門市管理 ---------------- */
 function renderStores(){
+  const canEdit = state.profile?.role === "admin";
   return `
+  ${!canEdit ? `<p style="font-size:12px; color:var(--ink-soft); margin:0 0 14px;">💡 門市資料異動（新增/停用門市、區域、一般報修類別）需要系統管理者處理，這裡先開放你查看目前狀態。</p>` : ""}
   <div class="grid grid-2" style="align-items:start;">
     <div class="card">
       <div class="section-title" style="margin-top:0;">新增區域</div>
+      ${canEdit ? `
       <p style="font-size:12px; color:var(--ink-soft); margin:0 0 10px;">例如：北1、北2、中、南1、南2，供區經理轄區與未來展店分配使用。</p>
       <div style="display:flex; gap:8px;">
         <input type="text" id="new-region-name" placeholder="區域名稱">
         <button class="btn btn-primary btn-sm" data-action="add-region">新增</button>
       </div>
       ${state.storeFormError ? `<div class="error-msg">${state.storeFormError}</div>` : ""}
+      ` : ``}
       <div class="section-title">既有區域</div>
       <div style="display:flex; flex-wrap:wrap; gap:8px;">
         ${(state.regions||[]).length===0 ? `<p style="font-size:12px; color:var(--ink-soft);">尚無區域資料</p>` :
@@ -640,6 +702,7 @@ function renderStores(){
       </div>
     </div>
 
+    ${canEdit ? `
     <div class="card">
       <div class="section-title" style="margin-top:0;">新增門市</div>
       <label class="field-label">門市代碼</label>
@@ -653,7 +716,7 @@ function renderStores(){
       </select>
       <div class="checkbox-row"><input type="checkbox" id="new-store-central"><label for="new-store-central">中央廚房／非門市單位</label></div>
       <button class="btn btn-primary" style="margin-top:10px;" data-action="add-store">新增門市</button>
-    </div>
+    </div>` : `<div class="card"><div class="section-title" style="margin-top:0;">新增門市</div><p style="font-size:12px; color:var(--ink-soft);">只有系統管理者可以新增門市。</p></div>`}
     <div class="card" style="grid-column:1 / -1;">
       <div class="section-title" style="margin-top:0;">一般報修類別</div>
       <p style="font-size:12px; color:var(--ink-soft); margin:0 0 10px;">門市報修「一般報修（無資產）」時可以選的類別，例如水電、門鎖、招牌。</p>
@@ -661,9 +724,10 @@ function renderStores(){
         ${(state.generalCategories||[]).map(c=>`
           <span class="status-pill" style="display:inline-flex; align-items:center; gap:6px; background:var(--chip-bg);">
             ${c.name}
-            <span data-action="delete-general-category" data-id="${c.id}" style="cursor:pointer; opacity:.6; font-weight:700;">✕</span>
+            ${canEdit ? `<span data-action="delete-general-category" data-id="${c.id}" style="cursor:pointer; opacity:.6; font-weight:700;">✕</span>` : ``}
           </span>`).join("") || `<p style="font-size:12px; color:var(--ink-soft);">尚無類別資料</p>`}
       </div>
+      ${canEdit ? `
       <div style="display:flex; gap:8px; max-width:420px;">
         <input type="text" id="new-general-category" placeholder="新類別名稱，例如：消防" style="flex:1;">
         <button class="btn btn-primary btn-sm" data-action="add-general-category">新增</button>
@@ -678,16 +742,17 @@ function renderStores(){
         </div>
         <p style="font-size:11px; color:var(--ink-soft); margin:6px 0 0;">點一下項目會帶入上面的新增欄位，確認名稱後按新增即可。</p>
       </div>` : ""}
+      ` : ``}
     </div>
   </div>
 
   <div class="section-title">門市清單</div>
   <div class="card" style="padding:0; overflow-x:auto;">
     <table>
-      <thead><tr><th>代碼</th><th>名稱</th><th>區域</th><th>狀態</th><th style="width:140px;"></th></tr></thead>
+      <thead><tr><th>代碼</th><th>名稱</th><th>區域</th><th>狀態</th>${canEdit ? `<th style="width:140px;"></th>` : ``}</tr></thead>
       <tbody>
         ${state.stores.length===0 ? `<tr><td colspan="5" style="text-align:center; color:var(--ink-soft); padding:30px;">尚無門市資料</td></tr>` : state.stores.map(s=>{
-          const editing = state.editingStoreId === s.id;
+          const editing = canEdit && state.editingStoreId === s.id;
           const region = (state.regions||[]).find(r=>r.id===s.region_id);
           if(!editing){
             return `
@@ -696,7 +761,7 @@ function renderStores(){
               <td>${s.name||''}${s.is_central_unit?' <span class="status-pill">中央廚房</span>':''}</td>
               <td>${region ? region.name : '<span style="color:var(--ink-soft);">未指定</span>'}</td>
               <td>${s.status==='active' ? '<span class="status-pill" style="background:var(--ok); color:#fff;">營業中</span>' : '<span class="status-pill" style="background:var(--ink-soft); color:#fff;">已歇業</span>'}</td>
-              <td><button class="btn btn-outline btn-sm" data-action="edit-store" data-id="${s.id}">✎ 編輯</button></td>
+              ${canEdit ? `<td><button class="btn btn-outline btn-sm" data-action="edit-store" data-id="${s.id}">✎ 編輯</button></td>` : ``}
             </tr>`;
           }
           return `
@@ -1070,7 +1135,7 @@ function renderVendors(){
   </div>
   <div class="card" style="padding:0; overflow-x:auto;">
     <table>
-      <thead><tr><th>名稱</th><th>類型</th><th>聯絡人</th><th>電話</th><th>LINE/其他</th><th>服務區域</th><th style="width:140px;"></th></tr></thead>
+      <thead><tr><th>名稱</th><th>類型</th><th>聯絡人</th><th>電話</th><th>LINE/其他</th><th>服務區域</th><th style="width:190px;"></th></tr></thead>
       <tbody>
         ${(()=>{
           const q = (state.vendorFilterQ||'').trim();
@@ -1087,7 +1152,7 @@ function renderVendors(){
                 <td>${v.phone||'—'}</td>
                 <td>${v.line_contact||'—'}</td>
                 <td>${v.service_area||'—'}</td>
-                <td><button class="btn btn-outline btn-sm" data-action="edit-vendor-row" data-id="${v.id}">✎ 編輯</button></td>
+                <td><button class="btn btn-outline btn-sm" data-action="edit-vendor-row" data-id="${v.id}">✎ 編輯</button> <button class="btn btn-outline btn-sm" data-action="view-vendor-cases" data-id="${v.id}">🔎 目前案件</button></td>
               </tr>`;
             }
             return `
@@ -1291,13 +1356,21 @@ async function onAction(e){
   else if(action === "open-case"){ await openCase(el.dataset.id); }
   else if(action === "save-case"){ await saveCase(el); }
   else if(action === "copy-case-info"){ copyCaseInfo(); }
-  else if(action === "delete-case"){ await deleteCase(); }
+  else if(action === "start-archive-case"){ startArchiveCase(); }
+  else if(action === "cancel-archive-case"){ cancelArchiveCase(); }
+  else if(action === "confirm-archive-case"){ await confirmArchiveCase(); }
+  else if(action === "restore-case"){ await restoreCase(); }
   else if(action === "upload-attachment"){ triggerAttachmentUpload("case", state.currentCase.id, el.dataset.category); }
   else if(action === "upload-asset-photo"){ triggerAttachmentUpload("asset", state.currentAsset.id, "asset_photo"); }
   else if(action === "quick-add-vendor"){ await quickAddVendor(); }
   else if(action === "save-account"){ await saveAccount(el.dataset.id); }
   else if(action === "add-vendor"){ await addVendor(); }
   else if(action === "edit-vendor-row"){ state.editingVendorId = el.dataset.id; render(); }
+  else if(action === "view-vendor-cases"){
+    const f = { status:"", storeId:"", urgency:"", q:"", hideClosed:true, overdueOnly:false, showArchived:false, vendorId: el.dataset.id };
+    state.caseFilters = f;
+    await goTo("case-list");
+  }
   else if(action === "cancel-edit-vendor"){ state.editingVendorId = null; render(); }
   else if(action === "save-vendor-row"){ await saveVendorRow(el.dataset.id); }
   else if(action === "delete-vendor-row"){ await deleteVendorRow(el.dataset.id, el.dataset.name); }
@@ -1371,6 +1444,12 @@ async function afterLogin(){
     await sb.auth.signOut();
     state.view = "login"; render(); return;
   }
+  if(["store","district_manager"].includes(profile.role)){
+    state.profile = profile;
+    state.view = "role-blocked";
+    render();
+    return;
+  }
   state.profile = profile;
   await loadStores();
   await loadRegions();
@@ -1396,7 +1475,7 @@ async function loadSidebarBadgeCounts(){
   if(!p) return;
   try{
     const { count: newCases } = await scopedCaseQuery(
-      sb.from("cases").select("id", { count:"exact", head:true }).eq("status","new")
+      sb.from("cases").select("id", { count:"exact", head:true }).eq("status","new").is("deleted_at", null)
     );
     state.sidebarBadges.newCases = newCases || 0;
 
@@ -1404,10 +1483,11 @@ async function loadSidebarBadgeCounts(){
       sb.from("cases").select("id", { count:"exact", head:true })
         .in("status", OVERDUE_ELIGIBLE_STATUSES)
         .lt("updated_at", overdueCutoffIso())
+        .is("deleted_at", null)
     );
     state.sidebarBadges.overdueCases = overdueCases || 0;
 
-    if(["general_affairs","admin"].includes(p.role)){
+    if(["general_affairs_supervisor","admin"].includes(p.role)){
       const { count: pendingAccounts } = await sb.from("users_profile").select("id", { count:"exact", head:true }).eq("status","disabled");
       state.sidebarBadges.pendingAccounts = pendingAccounts || 0;
     } else {
@@ -1797,7 +1877,7 @@ async function loadDashboard(){
   const monthStart = new Date(); monthStart.setDate(1);
   const monthStartStr = monthStart.toISOString().slice(0,10);
 
-  let q = scopedCaseQuery(sb.from("cases").select("status, urgency, repeat_fault, created_at, final_amount, closed_at, updated_at"));
+  let q = scopedCaseQuery(sb.from("cases").select("status, urgency, repeat_fault, created_at, final_amount, closed_at, updated_at").is("deleted_at", null));
   const { data: allCases, error } = await q;
   if(error){ console.error(error); return; }
 
@@ -1875,11 +1955,17 @@ async function loadCases(){
   const f = state.caseFilters;
   let q = scopedCaseQuery(sb.from("cases").select("*, stores(name)").order("created_at", { ascending:false }).limit(200));
   if(f.storeId) q = q.eq("store_id", f.storeId);
-  if(f.overdueOnly){
-    q = q.in("status", OVERDUE_ELIGIBLE_STATUSES).lt("updated_at", overdueCutoffIso());
+  if(f.vendorId) q = q.eq("vendor_id", f.vendorId);
+  if(f.showArchived){
+    q = q.not("deleted_at", "is", null);
   } else {
-    if(f.status) q = q.eq("status", f.status);
-    else if(f.hideClosed) q = q.not("status", "in", "(closed,cancelled)");
+    q = q.is("deleted_at", null);
+    if(f.overdueOnly){
+      q = q.in("status", OVERDUE_ELIGIBLE_STATUSES).lt("updated_at", overdueCutoffIso());
+    } else {
+      if(f.status) q = q.eq("status", f.status);
+      else if(f.hideClosed) q = q.not("status", "in", "(closed,cancelled)");
+    }
   }
   if(f.urgency) q = q.eq("urgency", f.urgency);
   if(f.q) q = q.ilike("case_no", `%${f.q}%`);
@@ -1889,7 +1975,7 @@ async function loadCases(){
 }
 
 function applyQuickFilter(key){
-  const f = { status:"", storeId:"", urgency:"", q:"", hideClosed:true, overdueOnly:false };
+  const f = { status:"", storeId:"", urgency:"", q:"", hideClosed:true, overdueOnly:false, showArchived:false, vendorId:"" };
   if(key === "pending") f.status = "new";
   if(key === "pending_info") f.status = "pending_info";
   if(key === "pending_confirm") f.status = "pending_store_confirm";
@@ -1901,9 +1987,11 @@ function applyQuickFilter(key){
 async function applyCaseFilters(){
   state.caseFilters.storeId = document.getElementById("filter-store")?.value || "";
   state.caseFilters.status = document.getElementById("filter-status")?.value || "";
+  state.caseFilters.vendorId = document.getElementById("filter-vendor")?.value || "";
   state.caseFilters.urgency = document.getElementById("filter-urgency")?.value || "";
   state.caseFilters.q = document.getElementById("filter-q")?.value || "";
   state.caseFilters.hideClosed = !(document.getElementById("filter-show-closed")?.checked);
+  state.caseFilters.showArchived = !!(document.getElementById("filter-show-archived")?.checked);
   state.caseFilters.overdueOnly = false; // 手動套用篩選時，離開「只看逾期」快速篩選
   await loadCases();
   render();
@@ -1931,6 +2019,7 @@ async function loadOtherCategoryStats(){
 }
 
 async function addGeneralCategory(){
+  if(!requireAdmin("新增一般報修類別")) return;
   const input = document.getElementById("new-general-category");
   const name = input.value.trim();
   if(!name){ alert("請輸入類別名稱"); return; }
@@ -1943,6 +2032,7 @@ async function addGeneralCategory(){
 }
 
 async function deleteGeneralCategory(id){
+  if(!requireAdmin("刪除一般報修類別")) return;
   if(!confirm("確定要刪除這個類別嗎？")) return;
   const { error } = await sb.from("general_report_categories").delete().eq("id", id);
   if(error){ alert("刪除失敗：" + error.message); return; }
@@ -1951,6 +2041,7 @@ async function deleteGeneralCategory(id){
 }
 
 async function resetPassword(userId, displayName){
+  if(!["general_affairs_supervisor","admin"].includes(state.profile?.role)){ alert("只有總務主管或系統管理者可以重設密碼"); return; }
   const newPw = prompt(`要幫「${displayName}」設定新密碼，請輸入新密碼（至少6碼）：`);
   if(!newPw) return;
   if(newPw.length < 6){ alert("密碼至少需要6碼"); return; }
@@ -1988,6 +2079,7 @@ async function goTo(view){
   state.editingStoreId = null;
   state.editingContactId = null;
   state.editingVendorId = null;
+  state.showArchiveConfirm = false;
   if(view === "dashboard") await loadDashboard();
   else if(view === "case-list") await loadCases();
   else if(view === "assets"){ await loadAssetMajorCategories(); await loadAssetMinorCategories(); await loadAssets(); }
@@ -2009,6 +2101,7 @@ async function openCase(id){
   const { data, error } = await sb.from("cases").select("*, stores(name)").eq("id", id).single();
   if(error){ alert("載入失敗：" + error.message); return; }
   state.currentCase = { ...data, store_name: data.stores?.name || "" };
+  state.showArchiveConfirm = false;
   state.view = "case-detail";
   render();
   loadCaseLogs(id);
@@ -2172,8 +2265,8 @@ async function saveCase(btn){
     broad_impact: document.getElementById("edit-broad-impact").checked,
     needs_approval: document.getElementById("edit-needs-approval").checked,
     approval_type: document.getElementById("edit-approval-type").value || null,
-    manager_approved: document.getElementById("edit-manager-approved").checked,
-    manager_approved_note: document.getElementById("edit-manager-note").value || null,
+    manager_approved: document.getElementById("edit-manager-approved") ? document.getElementById("edit-manager-approved").checked : document.getElementById("edit-manager-approved-readonly").value === "1",
+    manager_approved_note: document.getElementById("edit-manager-note") ? (document.getElementById("edit-manager-note").value || null) : (document.getElementById("edit-manager-note-readonly").value || null),
     updated_at: new Date().toISOString()
   };
   if(newStatus === "closed" && !c.closed_at) updates.closed_at = new Date().toISOString();
@@ -2201,32 +2294,47 @@ async function saveCase(btn){
 
 function numOrNull(v){ return v === "" || v === null || v === undefined ? null : Number(v); }
 
-async function deleteCase(){
+function startArchiveCase(){
+  state.showArchiveConfirm = true;
+  render();
+  const input = document.getElementById("archive-confirm-input");
+  if(input) input.focus();
+}
+
+function cancelArchiveCase(){
+  state.showArchiveConfirm = false;
+  render();
+}
+
+async function confirmArchiveCase(){
   const c = state.currentCase;
   if(!c) return;
-  if(!confirm(`確定要刪除案件「${c.case_no}」嗎？\n\n這個動作無法復原，處理歷程跟附件也會一併刪除。`)) return;
+  if(state.profile?.role !== "admin"){ alert("只有系統管理者可以封存案件"); return; }
+  const typed = (document.getElementById("archive-confirm-input")?.value || "").trim();
+  if(typed !== c.case_no){ alert(`輸入的案件編號不符，請重新輸入「${c.case_no}」`); return; }
 
-  // 先刪附件檔案（儲存空間裡的實體檔案），再刪資料庫紀錄
-  try{
-    const { data: attachments } = await sb.from("attachments").select("file_path").eq("related_type","case").eq("related_id", c.id);
-    for(const a of (attachments||[])){
-      const marker = "/attachments/";
-      const idx = a.file_path.indexOf(marker);
-      if(idx >= 0){
-        const path = decodeURIComponent(a.file_path.slice(idx + marker.length));
-        await sb.storage.from("attachments").remove([path]);
-      }
-    }
-  }catch(e){ /* 檔案清理失敗不影響後續刪除 */ }
+  // 軟刪除（封存）：只標記 deleted_at / deleted_by，不刪除任何資料、附件、照片
+  const { error } = await sb.from("cases").update({
+    deleted_at: new Date().toISOString(),
+    deleted_by: state.profile.id
+  }).eq("id", c.id);
+  if(error){ alert("封存失敗：" + error.message); return; }
 
-  await sb.from("attachments").delete().eq("related_type","case").eq("related_id", c.id);
-  await sb.from("case_logs").delete().eq("case_id", c.id);
-  const { error } = await sb.from("cases").delete().eq("id", c.id);
-  if(error){ alert("刪除失敗：" + error.message); return; }
-
-  alert("✅ 已刪除此案件");
+  state.showArchiveConfirm = false;
+  alert("✅ 已封存此案件，管理者隨時可以還原");
   await loadSidebarBadgeCounts();
   await goTo("case-list");
+}
+
+async function restoreCase(){
+  const c = state.currentCase;
+  if(!c) return;
+  if(state.profile?.role !== "admin"){ alert("只有系統管理者可以還原案件"); return; }
+  if(!confirm(`確定要還原案件「${c.case_no}」嗎？還原後會重新出現在案件列表。`)) return;
+  const { error } = await sb.from("cases").update({ deleted_at: null, deleted_by: null }).eq("id", c.id);
+  if(error){ alert("還原失敗：" + error.message); return; }
+  await openCase(c.id);
+  alert("✅ 已還原此案件");
 }
 
 function copyCaseInfo(){
@@ -2311,6 +2419,7 @@ function triggerAttachmentUpload(relatedType, relatedId, category){
    帳號管理
    ============================================================ */
 async function saveAccount(id){
+  if(!["general_affairs_supervisor","admin"].includes(state.profile?.role)){ alert("只有總務主管或系統管理者可以管理帳號"); return; }
   const row = document.querySelector(`tr[data-account-row="${id}"]`);
   const role = row.querySelector('[data-field="role"]').value;
   const storeId = row.querySelector('[data-field="store_id"]').value || null;
@@ -2347,6 +2456,7 @@ async function saveAccount(id){
    門市／區域管理
    ============================================================ */
 async function addRegion(){
+  if(!requireAdmin("新增區域")) return;
   const name = document.getElementById("new-region-name").value.trim();
   if(!name){ state.storeFormError = "請輸入區域名稱"; render(); return; }
   const { error } = await sb.from("regions").insert({ name });
@@ -2357,6 +2467,7 @@ async function addRegion(){
 }
 
 async function addStore(){
+  if(!requireAdmin("新增門市")) return;
   const code = document.getElementById("new-store-code").value.trim();
   const name = document.getElementById("new-store-name").value.trim();
   const regionId = document.getElementById("new-store-region").value || null;
@@ -2370,6 +2481,7 @@ async function addStore(){
 }
 
 async function saveStore(id){
+  if(!requireAdmin("編輯門市資料")) return;
   const row = document.querySelector(`tr[data-store-row="${id}"]`);
   const name = row.querySelector('[data-field="name"]').value.trim();
   const regionId = row.querySelector('[data-field="region_id"]').value || null;
