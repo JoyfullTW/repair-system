@@ -217,7 +217,7 @@
     載入中…如果這段文字一直沒有消失，代表網頁程式無法執行，請截圖回報。
   </div>
 </div>
-<div class="version-badge">store build 29</div>
+<div class="version-badge">store build 30</div>
 
 <script>
 /* ============================================================
@@ -660,6 +660,7 @@ function renderCaseDetail(){
   const canSeeVendor = state.profile && ["general_affairs","admin"].includes(state.profile.role);
 
   let actionArea = "";
+  const vendorStageStatuses = ["initial_troubleshoot","contacting_vendor","pending_quote","pending_approval","pending_parts","in_repair"];
   if(c.status === "pending_info"){
     const infoNote = (state.caseLogsRaw||[]).find(l=> l.to_status === "pending_info" && l.note);
     actionArea = `
@@ -678,6 +679,18 @@ function renderCaseDetail(){
           <button class="btn btn-primary" data-action="confirm-result" data-value="normal">正常，可以結案</button>
         </div>
         <button class="btn btn-ghost" data-action="confirm-result" data-value="abnormal">還是異常，需要再處理</button>
+      </div>`;
+  } else if(vendorStageStatuses.includes(c.status)){
+    actionArea = `
+      <div class="card">
+        <strong>📣 回報廠商進度</strong>
+        <p style="font-size:13px; color:var(--ink-soft); margin:4px 0 10px;">廠商有跟你們說最新狀況嗎？回報之後總務就能在後台看到，不用再另外傳 LINE。</p>
+        <textarea id="vendor-progress-note" placeholder="選填，可以補充細節，例如：廠商說明天下午會到場"></textarea>
+        <div style="display:flex; flex-direction:column; gap:8px; margin-top:10px;">
+          <button class="btn btn-primary" data-action="report-vendor-progress" data-value="done">✅ 廠商已完成維修</button>
+          <button class="btn btn-outline" data-action="report-vendor-progress" data-value="parts">⏳ 廠商說要等零件</button>
+          <button class="btn btn-ghost" data-action="report-vendor-progress" data-value="note">📝 只留言，不改變案件狀態</button>
+        </div>
       </div>`;
   }
 
@@ -1211,6 +1224,7 @@ async function onAction(e){
   else if(action === "report-submit"){ await submitReport(); }
   else if(action === "open-case"){ await openCase(el.dataset.id); }
   else if(action === "confirm-result"){ await confirmCaseResult(el.dataset.value); }
+  else if(action === "report-vendor-progress"){ await reportVendorProgress(el.dataset.value); }
   else if(action === "upload-slot"){
     fileTarget = { mode:"new-report", index: Number(el.dataset.index) };
     fileInput.multiple = false;
@@ -1515,10 +1529,51 @@ async function confirmCaseResult(result){
   const { error } = await sb.from("cases").update({
     store_confirm_result: result,
     status: newStatus,
-    closed_at: result === "normal" ? new Date().toISOString() : null
+    closed_at: result === "normal" ? new Date().toISOString() : null,
+    updated_at: new Date().toISOString()
   }).eq("id", c.id);
   if(error){ alert("更新失敗：" + error.message); return; }
+  await sb.from("case_logs").insert({
+    case_id: c.id, action_type: "status_change",
+    from_status: c.status, to_status: newStatus,
+    note: result === "normal" ? "門市確認：設備已恢復正常，案件結案" : "門市確認：狀況仍然異常，退回維修中",
+    created_by: state.profile?.id || null
+  });
   alert(result === "normal" ? "已確認正常，案件結案" : "已標記異常，案件將退回維修中");
+  await openCase(c.id);
+}
+
+async function reportVendorProgress(kind){
+  const c = state.currentCase;
+  const noteInput = document.getElementById("vendor-progress-note");
+  const extra = (noteInput?.value || "").trim();
+  if(kind === "note" && !extra){ alert("請先輸入要留言的內容"); return; }
+
+  let newStatus = c.status;
+  let note = "";
+  if(kind === "done"){
+    newStatus = "pending_store_confirm";
+    note = "門市回報：廠商已完成維修" + (extra ? `（${extra}）` : "");
+  } else if(kind === "parts"){
+    newStatus = "pending_parts";
+    note = "門市回報：廠商說需要等待零件" + (extra ? `（${extra}）` : "");
+  } else {
+    note = `門市留言：${extra}`;
+  }
+
+  const updates = { updated_at: new Date().toISOString() };
+  if(newStatus !== c.status) updates.status = newStatus;
+  const { error } = await sb.from("cases").update(updates).eq("id", c.id);
+  if(error){ alert("回報失敗：" + error.message); return; }
+
+  await sb.from("case_logs").insert({
+    case_id: c.id, action_type: "status_change",
+    from_status: c.status, to_status: newStatus,
+    note, created_by: state.profile?.id || null
+  });
+
+  if(noteInput) noteInput.value = "";
+  alert(kind === "note" ? "✅ 已送出留言，總務登入後台就能看到" : "✅ 已回報，總務會看到最新狀況");
   await openCase(c.id);
 }
 
