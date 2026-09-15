@@ -161,7 +161,7 @@
 </head>
 <body>
 <div id="app"></div>
-<div class="version-badge">admin build 42</div>
+<div class="version-badge">admin build 43</div>
 
 <script>
 /* ============================================================
@@ -487,10 +487,11 @@ function renderCaseDetail(){
   const bestMatchIds2 = new Set([...historyMatchIds2, ...bestMatchList.map(v=>v.id)]);
   const suggestedList = (state.caseVendorSuggestions||[]).filter(v=>!bestMatchIds2.has(v.id));
   const suggestedIds = new Set([...bestMatchIds2, ...suggestedList.map(v=>v.id)]);
-  const historyMatchOptions = historyMatchList.map(v=>`<option value="${v.id}" ${c.vendor_id===v.id?'selected':''}>${v.name}（過去處理過 ${v.count} 次）${v.vendor_type==='temporary'?'（臨時）':''}</option>`).join("");
-  const bestMatchOptions = bestMatchList.map(v=>`<option value="${v.id}" ${c.vendor_id===v.id?'selected':''}>${v.category?`[${v.category}] `:''}${v.name}${v.vendor_type==='temporary'?'（臨時）':''}</option>`).join("");
-  const suggestedOptions = suggestedList.map(v=>`<option value="${v.id}" ${c.vendor_id===v.id?'selected':''}>${v.category ? `[${v.category}] ` : ''}${v.name}${v.vendor_type==='temporary'?'（臨時）':''}</option>`).join("");
-  const otherOptions = state.vendors.filter(v=>!suggestedIds.has(v.id)).map(v=>`<option value="${v.id}" ${c.vendor_id===v.id?'selected':''}>${v.name}${v.vendor_type==='temporary'?'（臨時）':''}</option>`).join("");
+  const searchAttr = v => `data-search="${(`${v.name||''} ${v.contact_person||''} ${v.phone||''} ${v.line_contact||''} ${v.service_area||''}`).replace(/"/g,'&quot;').toLowerCase()}"`;
+  const historyMatchOptions = historyMatchList.map(v=>`<option value="${v.id}" ${searchAttr(v)} ${c.vendor_id===v.id?'selected':''}>${v.name}（過去處理過 ${v.count} 次）${v.vendor_type==='temporary'?'（臨時）':''}</option>`).join("");
+  const bestMatchOptions = bestMatchList.map(v=>`<option value="${v.id}" ${searchAttr(v)} ${c.vendor_id===v.id?'selected':''}>${v.category?`[${v.category}] `:''}${v.name}${v.vendor_type==='temporary'?'（臨時）':''}</option>`).join("");
+  const suggestedOptions = suggestedList.map(v=>`<option value="${v.id}" ${searchAttr(v)} ${c.vendor_id===v.id?'selected':''}>${v.category ? `[${v.category}] ` : ''}${v.name}${v.vendor_type==='temporary'?'（臨時）':''}</option>`).join("");
+  const otherOptions = state.vendors.filter(v=>!suggestedIds.has(v.id)).map(v=>`<option value="${v.id}" ${searchAttr(v)} ${c.vendor_id===v.id?'selected':''}>${v.name}${v.vendor_type==='temporary'?'（臨時）':''}</option>`).join("");
   const vendorOptions = (historyMatchOptions ? `<optgroup label="📊 這家店以前這樣處理過">${historyMatchOptions}</optgroup>` : "") +
     (bestMatchOptions ? `<optgroup label="🎯 最符合這台設備">${bestMatchOptions}</optgroup>` : "") +
     (suggestedOptions ? `<optgroup label="⭐ 本店常用廠商">${suggestedOptions}</optgroup>` : "") +
@@ -1314,13 +1315,15 @@ function bindEvents(){
     const temp = document.createElement("select");
     temp.innerHTML = origHtml;
     const newSelect = document.createElement("select");
+    const ql = q.toLowerCase();
+    const isMatch = node => (node.dataset.search || node.textContent).toLowerCase().includes(ql);
     Array.from(temp.children).forEach(node=>{
       if(node.tagName === "OPTION"){
-        if(!node.value || node.textContent.toLowerCase().includes(q.toLowerCase())){
+        if(!node.value || isMatch(node)){
           newSelect.appendChild(node.cloneNode(true));
         }
       } else if(node.tagName === "OPTGROUP"){
-        const matchedOpts = Array.from(node.children).filter(o=> o.textContent.toLowerCase().includes(q.toLowerCase()));
+        const matchedOpts = Array.from(node.children).filter(isMatch);
         if(matchedOpts.length){
           const og = document.createElement("optgroup");
           og.label = node.label;
