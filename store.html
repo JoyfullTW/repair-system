@@ -217,7 +217,7 @@
     載入中…如果這段文字一直沒有消失，代表網頁程式無法執行，請截圖回報。
   </div>
 </div>
-<div class="version-badge">store build 30</div>
+<div class="version-badge">store build 31</div>
 
 <script>
 /* ============================================================
@@ -248,6 +248,30 @@ window.addEventListener("unhandledrejection", function(e){
 });
 
 let sb = null;
+
+/* 上傳前自動壓縮圖片，控制 Storage 空間成長速度；影片跟非圖片檔案不處理，原檔上傳 */
+async function compressImage(file){
+  if(!file || !file.type || !file.type.startsWith("image/")) return file;
+  try{
+    const bitmap = await createImageBitmap(file);
+    const maxDim = 1600;
+    let { width, height } = bitmap;
+    if(width > maxDim || height > maxDim){
+      const scale = maxDim / Math.max(width, height);
+      width = Math.round(width * scale);
+      height = Math.round(height * scale);
+    }
+    const canvas = document.createElement("canvas");
+    canvas.width = width; canvas.height = height;
+    const ctx = canvas.getContext("2d");
+    ctx.drawImage(bitmap, 0, 0, width, height);
+    const blob = await new Promise(resolve => canvas.toBlob(resolve, "image/jpeg", 0.75));
+    if(!blob || blob.size >= file.size) return file;
+    return new File([blob], file.name.replace(/\.[^.]+$/, ".jpg"), { type: "image/jpeg" });
+  }catch(e){
+    return file;
+  }
+}
 let initError = "";
 try{
   if(!window.supabase){
@@ -657,7 +681,7 @@ function ticketHtml(c){
 function renderCaseDetail(){
   const c = state.currentCase;
   if(!c) return `<main><div class="empty">找不到案件</div></main>`;
-  const canSeeVendor = state.profile && ["general_affairs","admin"].includes(state.profile.role);
+  const canSeeVendor = state.profile && ["general_affairs","general_affairs_supervisor","admin"].includes(state.profile.role);
 
   let actionArea = "";
   const vendorStageStatuses = ["initial_troubleshoot","contacting_vendor","pending_quote","pending_approval","pending_parts","in_repair"];
@@ -1136,6 +1160,7 @@ fileInput.addEventListener("change", async (e)=>{
     }
   }else if(target.mode === "asset-photo"){
     try{
+      file = await compressImage(file);
       const ext = (file.name.split(".").pop() || "dat").toLowerCase();
       const path = `asset-photos/${target.assetId}/${Date.now()}-${Math.random().toString(36).slice(2,7)}.${ext}`;
       const { error: upErr } = await sb.storage.from("attachments").upload(path, file);
@@ -1172,6 +1197,7 @@ function checkVideoDuration(file){
 }
 
 async function uploadAttachment(caseId, file, category){
+  file = await compressImage(file);
   const ext = (file.name.split(".").pop() || "dat").toLowerCase();
   const path = `case-photos/${caseId}/${Date.now()}-${Math.random().toString(36).slice(2,7)}.${ext}`;
   const { error: upErr } = await sb.storage.from("attachments").upload(path, file);
@@ -1961,9 +1987,10 @@ async function submitNewInfra(){
   // 逐一上傳選好的照片（可多張），任何一張失敗不影響紀錄本身已建立成功
   for(const file of su.newInfra.photoFiles){
     try{
-      const ext = (file.name.split(".").pop() || "jpg").toLowerCase();
+      const compressed = await compressImage(file);
+      const ext = (compressed.name.split(".").pop() || "jpg").toLowerCase();
       const path = `store-infra/${storeId}/${Date.now()}-${Math.random().toString(36).slice(2,7)}.${ext}`;
-      const { error: upErr } = await sb.storage.from("attachments").upload(path, file);
+      const { error: upErr } = await sb.storage.from("attachments").upload(path, compressed);
       if(upErr) throw upErr;
       const { data: urlData } = sb.storage.from("attachments").getPublicUrl(path);
       await sb.from("attachments").insert({

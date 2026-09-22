@@ -161,7 +161,7 @@
 </head>
 <body>
 <div id="app"></div>
-<div class="version-badge">admin build 44</div>
+<div class="version-badge">admin build 45</div>
 
 <script>
 /* ============================================================
@@ -180,6 +180,30 @@ window.addEventListener("unhandledrejection", function(e){
 });
 
 let sb = null;
+
+/* 上傳前自動壓縮圖片，控制 Storage 空間成長速度；影片跟非圖片檔案不處理，原檔上傳 */
+async function compressImage(file){
+  if(!file || !file.type || !file.type.startsWith("image/")) return file;
+  try{
+    const bitmap = await createImageBitmap(file);
+    const maxDim = 1600;
+    let { width, height } = bitmap;
+    if(width > maxDim || height > maxDim){
+      const scale = maxDim / Math.max(width, height);
+      width = Math.round(width * scale);
+      height = Math.round(height * scale);
+    }
+    const canvas = document.createElement("canvas");
+    canvas.width = width; canvas.height = height;
+    const ctx = canvas.getContext("2d");
+    ctx.drawImage(bitmap, 0, 0, width, height);
+    const blob = await new Promise(resolve => canvas.toBlob(resolve, "image/jpeg", 0.75));
+    if(!blob || blob.size >= file.size) return file;
+    return new File([blob], file.name.replace(/\.[^.]+$/, ".jpg"), { type: "image/jpeg" });
+  }catch(e){
+    return file;
+  }
+}
 let initError = "";
 try{
   if(!window.supabase){ throw new Error("Supabase JS 函式庫未載入成功，請檢查網路連線。"); }
@@ -231,6 +255,7 @@ let state = {
   contacts: [], editingStoreId: null, editingContactId: null, generalCategories: [], otherCategoryStats: [], editingVendorId: null, vendorFilterQ: "",
   infraFilters: { storeId: "" }, infraRecords: [], infraPhotos: {}, sidebarBadges: { newCases: 0, pendingAccounts: 0, overdueCases: 0 },
   overdueDays: 2,
+  storageLimitMb: 1024, storageStats: null,
   manuals: [], manualFilterQ: "", manualFormError: "",
   dashboardStats: null,
   caseFilters: { status:"", storeId:"", urgency:"", q:"", hideClosed:true, overdueOnly:false, showArchived:false, vendorId:"" },
@@ -396,6 +421,27 @@ function renderDashboard(){
     <div class="card stat-card"><div class="n">${st.monthClosed}</div><div class="label">本月完成</div></div>
     <div class="card stat-card"><div class="n mono">$${st.monthCost.toLocaleString()}</div><div class="label">本月維修費用</div></div>
     <div class="card stat-card"><div class="n">${st.pendingAccounts}</div><div class="label">待審核帳號</div></div>
+  </div>
+  ${["general_affairs","general_affairs_supervisor","admin"].includes(state.profile?.role) ? renderStorageWidget() : ""}`;
+}
+
+function renderStorageWidget(){
+  if(!state.storageStats) return "";
+  const usedMb = state.storageStats.totalMb;
+  const limitMb = state.storageLimitMb || 1024;
+  const pct = Math.min(100, (usedMb / limitMb) * 100);
+  const tone = pct >= 90 ? "var(--err,#C13F3F)" : pct >= 70 ? "var(--warn,#B8860B)" : "var(--ok,#3E8E5A)";
+  return `
+  <div class="section-title">照片／影片儲存空間</div>
+  <div class="card">
+    <div style="display:flex; justify-content:space-between; align-items:baseline; margin-bottom:8px;">
+      <span style="font-size:14px; font-weight:700;">${usedMb.toFixed(0)} MB / ${limitMb.toLocaleString()} MB</span>
+      <span style="font-size:12px; color:var(--ink-soft);">共 ${state.storageStats.totalFiles.toLocaleString()} 個檔案</span>
+    </div>
+    <div style="background:var(--border); border-radius:6px; height:10px; overflow:hidden;">
+      <div style="width:${pct}%; height:100%; background:${tone};"></div>
+    </div>
+    ${pct >= 70 ? `<p style="font-size:12px; color:${tone}; margin:8px 0 0; font-weight:700;">⚠️ 空間使用已超過 ${pct.toFixed(0)}%，建議考慮升級 Supabase 方案。</p>` : ""}
   </div>`;
 }
 
@@ -1471,6 +1517,21 @@ async function loadSystemSettings(){
     const { data } = await sb.from("system_settings").select("value").eq("key","overdue_days_threshold").maybeSingle();
     if(data && data.value != null && !isNaN(Number(data.value))) state.overdueDays = Number(data.value);
   }catch(e){ /* 讀取失敗就用預設值 2 天 */ }
+  try{
+    const { data } = await sb.from("system_settings").select("value").eq("key","storage_limit_mb").maybeSingle();
+    if(data && data.value != null && !isNaN(Number(data.value))) state.storageLimitMb = Number(data.value);
+  }catch(e){ /* 讀取失敗就用預設值 1024 MB */ }
+}
+
+async function loadStorageStats(){
+  try{
+    const { data, error } = await sb.rpc("get_storage_stats");
+    if(error) throw error;
+    const totalBytes = (data||[]).reduce((sum,r)=> sum + Number(r.total_bytes||0), 0);
+    const totalFiles = (data||[]).reduce((sum,r)=> sum + Number(r.file_count||0), 0);
+    state.storageStats = { totalMb: totalBytes / 1024 / 1024, totalFiles };
+  }catch(e){ state.storageStats = null; }
+  if(state.view === "dashboard") render();
 }
 
 function overdueCutoffIso(){
@@ -1883,6 +1944,7 @@ async function loadDashboard(){
   const todayStr = new Date().toISOString().slice(0,10);
   const monthStart = new Date(); monthStart.setDate(1);
   const monthStartStr = monthStart.toISOString().slice(0,10);
+  if(["general_affairs","general_affairs_supervisor","admin"].includes(state.profile?.role)) loadStorageStats(); // 不用 await，避免拖慢 Dashboard 主要內容載入
 
   let q = scopedCaseQuery(sb.from("cases").select("status, urgency, repeat_fault, created_at, final_amount, closed_at, updated_at").is("deleted_at", null));
   const { data: allCases, error } = await q;
@@ -2399,10 +2461,11 @@ attachInput.addEventListener("change", async (e)=>{
   attachTarget = null;
   if(!file || !target) return;
   try{
-    const ext = (file.name.split(".").pop() || "dat").toLowerCase();
+    let f = await compressImage(file);
+    const ext = (f.name.split(".").pop() || "dat").toLowerCase();
     const folder = target.relatedType === "asset" ? "asset-photos" : "case-photos";
     const path = `${folder}/${target.relatedId}/${Date.now()}-${Math.random().toString(36).slice(2,7)}.${ext}`;
-    const { error: upErr } = await sb.storage.from("attachments").upload(path, file);
+    const { error: upErr } = await sb.storage.from("attachments").upload(path, f);
     if(upErr) throw upErr;
     const { data: urlData } = sb.storage.from("attachments").getPublicUrl(path);
     const { error: insErr } = await sb.from("attachments").insert({
@@ -2537,9 +2600,10 @@ async function addManual(){
   if(!file){ state.manualFormError = "請選擇檔案"; render(); return; }
 
   try{
-    const ext = (file.name.split(".").pop() || "pdf").toLowerCase();
+    const f = await compressImage(file);
+    const ext = (f.name.split(".").pop() || "pdf").toLowerCase();
     const path = `equipment-manuals/${Date.now()}-${Math.random().toString(36).slice(2,7)}.${ext}`;
-    const { error: upErr } = await sb.storage.from("attachments").upload(path, file);
+    const { error: upErr } = await sb.storage.from("attachments").upload(path, f);
     if(upErr) throw upErr;
     const { data: urlData } = sb.storage.from("attachments").getPublicUrl(path);
 
