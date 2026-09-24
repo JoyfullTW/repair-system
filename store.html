@@ -467,7 +467,10 @@ function renderHome(){
       <h1>${state.storeName || "門市"}</h1>
       <p>FACILITY REPORTING SYSTEM</p>
     </div>
-    ${notStoreAccount ? `<div class="banner" style="background:var(--chip-bg); color:var(--ink-soft);">ℹ️ 此帳號角色為「${state.profile.role}」，未綁定固定門市，新增報修時可自行選擇代表門市。</div>` : ""}
+    ${notStoreAccount ? (state.storeId
+      ? `<div class="banner" style="background:var(--chip-bg); color:var(--ink-soft);">ℹ️ 此帳號角色為「${state.profile.role}」，目前綁定門市：${state.storeName || '—'}，新增報修時會直接用此門市，不會出現選擇畫面。</div>`
+      : `<div class="banner" style="background:var(--chip-bg); color:var(--ink-soft);">ℹ️ 此帳號角色為「${state.profile.role}」，未綁定固定門市，新增報修時可自行選擇代表門市。</div>`
+    ) : ""}
     <div class="cta-grid">
       <div class="cta" data-action="go-new-report">
         <div class="ico">🧰</div>
