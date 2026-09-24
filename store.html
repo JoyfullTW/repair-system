@@ -217,7 +217,7 @@
     載入中…如果這段文字一直沒有消失，代表網頁程式無法執行，請截圖回報。
   </div>
 </div>
-<div class="version-badge">store build 31</div>
+<div class="version-badge">store build 32</div>
 
 <script>
 /* ============================================================
@@ -511,22 +511,15 @@ function renderNewReport(){
           ${storeOptions}
         </select>
       ` : ""}
-      <h2 style="margin:16px 0 6px;">這是哪一種報修？</h2>
-      <p style="font-size:12px; color:var(--ink-soft); margin:0 0 16px;">不確定設備有沒有建檔也沒關係，先點「連結既有資產」試著搜尋，找不到的話系統會直接幫你接成一般報修，不用自己判斷、也不用重新選。</p>
-      <div class="card" data-action="pick-type" data-type="asset" style="cursor:pointer; ${typeCardsDisabled?'opacity:.4; pointer-events:none;':''}">
-        <strong>🧊 連結既有資產</strong>
-        <p style="color:var(--ink-soft); font-size:13px; margin:6px 0 0;">冰箱、製冰機、爐具等已登記的設備</p>
-      </div>
-      <div class="card" data-action="pick-type" data-type="general" style="cursor:pointer; ${typeCardsDisabled?'opacity:.4; pointer-events:none;':''}">
-        <strong>🚿 一般報修（無資產）</strong>
-        <p style="color:var(--ink-soft); font-size:13px; margin:6px 0 0;">水電、門鎖、牆面、招牌、排水等</p>
+      <h2 style="margin:16px 0 6px;">報修哪一項設備？</h2>
+      <p style="font-size:12px; color:var(--ink-soft); margin:0 0 12px;">輸入設備名稱或資產編號搜尋，例如：冰箱、製冰機、C002-17-001-0001。不確定有沒有建檔也沒關係，找不到就直接送出一般報修。</p>
+      <label class="field-label">搜尋設備</label>
+      <input type="text" id="asset-search" placeholder="輸入設備名稱或資產編號…" ${typeCardsDisabled?'disabled':''}>
+      <div id="asset-results" style="margin-top:12px; color:var(--ink-soft); font-size:13px;">輸入關鍵字開始搜尋…</div>
+      <div class="card" data-action="pick-type" data-type="general" style="cursor:pointer; margin-top:22px; ${typeCardsDisabled?'opacity:.4; pointer-events:none;':''}">
+        <strong>🚿 找不到設備？建立一般報修</strong>
+        <p style="color:var(--ink-soft); font-size:13px; margin:6px 0 0;">水電、門鎖、牆面、招牌、排水等非固定資產問題</p>
       </div>`;
-  } else if(s.step === 2 && s.repairType === "asset"){
-    body = `
-      <h2 style="margin:4px 0 16px;">選擇資產</h2>
-      <label class="field-label">搜尋資產編號或名稱</label>
-      <input type="text" id="asset-search" placeholder="例如：製冰機 或 C002-17-001-0001">
-      <div id="asset-results" style="margin-top:12px; color:var(--ink-soft); font-size:13px;">輸入關鍵字開始搜尋…</div>`;
   } else if(s.step === 2 && s.repairType === "general"){
     const cats = state.generalCategories.length ? state.generalCategories : ["水電","門鎖","牆面","招牌","排水","其他"];
     body = `
@@ -1342,22 +1335,23 @@ function advanceReportStep(){
     s.reporterName = document.getElementById("reporter-name")?.value || "";
     s.reporterPhone = document.getElementById("reporter-phone")?.value || "";
   }
-  if(s.step === 1 && !s.repairType) return;
-  if(s.step === 2){
-    if(s.repairType === "asset" && !s.assetId){
-      // 搜尋過但找不到資產時，直接自動轉成一般報修，不用強迫使用者一定要點那張卡片
-      const q = document.getElementById("asset-search")?.value.trim();
-      if(q){
-        s.repairType = "general";
-        s.generalCategory = "其他";
-        s.faultCategory = q;
-        s.assetId = null;
-        s.assetLabel = "";
-      } else {
-        alert("請先搜尋並選擇資產，或是清空搜尋欄位改選一般報修");
-        return;
-      }
+  if(s.step === 1){
+    // 還沒從搜尋結果點選資產、也沒點「找不到設備」卡片：如果有打字，直接當成一般報修帶著關鍵字往下走
+    const q = document.getElementById("asset-search")?.value.trim();
+    if(q){
+      s.repairType = "general";
+      s.generalCategory = "其他";
+      s.faultCategory = q;
+      s.assetId = null;
+      s.assetLabel = "";
+      s.step = 3;
+      render();
+      return;
     }
+    alert("請先搜尋設備並選擇，或點選「找不到設備？建立一般報修」");
+    return;
+  }
+  if(s.step === 2){
     if(s.repairType === "general" && !s.generalCategory){ alert("請選擇報修類別"); return; }
   }
   if(s.step === 3){
@@ -1399,10 +1393,12 @@ function onAssetSearch(e){
       </div>`).join("");
     box.querySelectorAll("[data-pick-asset]").forEach(el=>{
       el.addEventListener("click", ()=>{
+        state.newReport.repairType = "asset";
         state.newReport.assetId = el.dataset.pickAsset;
         state.newReport.assetLabel = el.dataset.label;
         state.newReport.faultCategory = el.dataset.name;
-        advanceReportStep();
+        state.newReport.step = 3;
+        render();
       });
     });
     box.querySelectorAll("[data-action='fallback-general']").forEach(el=>{
