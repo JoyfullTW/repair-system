@@ -161,7 +161,7 @@
 </head>
 <body>
 <div id="app"></div>
-<div class="version-badge">admin build 45</div>
+<div class="version-badge">admin build 46</div>
 
 <script>
 /* ============================================================
@@ -230,6 +230,11 @@ const STATUS_GROUPS = [
 // 「已聯絡廠商之後」的逾期提醒範圍：沿用「處理中」分組，不含待受理（新案件/資料待補）與已結束案件
 const OVERDUE_ELIGIBLE_STATUSES = STATUS_GROUPS[1].options;
 const ROLE_LABEL = { store:"門市人員", general_affairs:"總務人員", general_affairs_supervisor:"總務主管", district_manager:"區經理", admin:"系統管理者" };
+const RULE_CATEGORIES = ["設備","清潔","裝修","廣告","弱電","消防","空調","POS"];
+function ruleCategoryOptions(selected){
+  const extra = (selected && !RULE_CATEGORIES.includes(selected)) ? [selected] : [];
+  return [...RULE_CATEGORIES, ...extra].map(c=>`<option value="${c}" ${c===selected?'selected':''}>${c}</option>`).join("");
+}
 function requireAdmin(actionLabel){
   if(state.profile?.role !== "admin"){ alert(`只有系統管理者可以${actionLabel}`); return false; }
   return true;
@@ -1281,7 +1286,7 @@ function renderAssignmentRules(){
     <div class="grid grid-4">
       <div><label class="field-label">設備／項目</label><input type="text" id="new-rule-note" placeholder="例如：洗碗機"></div>
       <div><label class="field-label">對應廠商</label><select id="new-rule-vendor"><option value="">請選擇…</option>${vendorOptions}</select></div>
-      <div><label class="field-label">類別</label><input type="text" id="new-rule-category" placeholder="例如：空調"></div>
+      <div><label class="field-label">類別</label><select id="new-rule-category"><option value="">請選擇…</option>${ruleCategoryOptions()}</select></div>
       <div><label class="field-label">優先順序</label><input type="number" id="new-rule-priority" value="1"></div>
     </div>
     ${state.assignmentFormError ? `<div class="error-msg">${state.assignmentFormError}</div>` : ""}
@@ -1300,7 +1305,7 @@ function renderAssignmentRules(){
                 ${vendorOptions.replace(`value="${r.vendor_id}"`, `value="${r.vendor_id}" selected`)}
               </select>
             </td>
-            <td><input type="text" data-field="category" value="${r.category||''}" style="min-width:100px;" placeholder="空調"></td>
+            <td><select data-field="category" style="min-width:100px;">${ruleCategoryOptions(r.category)}</select></td>
             <td><input type="number" data-field="priority" value="${r.priority||1}" style="min-width:70px;"></td>
             <td>
               <select data-field="confirm_status" style="min-width:110px;">
