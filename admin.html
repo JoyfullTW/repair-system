@@ -161,7 +161,7 @@
 </head>
 <body>
 <div id="app"></div>
-<div class="version-badge">admin build 47</div>
+<div class="version-badge">admin build 48</div>
 
 <script>
 /* ============================================================
@@ -2593,24 +2593,25 @@ async function saveCase(btn){
     return;
   }
 
-  if(newStatus !== c.status || note){
-    await sb.from("case_logs").insert({
-      case_id: c.id, action_type:"status_change",
-      from_status: c.status, to_status: newStatus,
-      note: note || `狀態更新為「${STATUS_LABEL[newStatus]}」`,
-      created_by: state.profile.id
-    });
-  }
-
-  // 廠商異動時，保留當時的判斷／處理經過，不因為換廠商就讓之前的紀錄消失
+  // 一次儲存裡「狀態變更／廠商異動／備註」只合併寫成一筆歷程，避免同一次操作被拆成好幾筆內容重複的紀錄
+  const statusChanged = newStatus !== c.status;
   const oldVendorId = c.vendor_id || null;
   const newVendorId = updates.vendor_id || null;
-  if(oldVendorId !== newVendorId){
-    const oldVendorName = oldVendorId ? (state.vendors.find(v=>v.id===oldVendorId)?.name || "（未知廠商）") : "（尚未指定）";
-    const newVendorName = newVendorId ? (state.vendors.find(v=>v.id===newVendorId)?.name || "（未知廠商）") : "（清空）";
+  const vendorChanged = oldVendorId !== newVendorId;
+
+  if(statusChanged || vendorChanged || note){
+    const parts = [];
+    if(statusChanged) parts.push(`狀態更新為「${STATUS_LABEL[newStatus]}」`);
+    if(vendorChanged){
+      const oldVendorName = oldVendorId ? (state.vendors.find(v=>v.id===oldVendorId)?.name || "（未知廠商）") : "（尚未指定）";
+      const newVendorName = newVendorId ? (state.vendors.find(v=>v.id===newVendorId)?.name || "（未知廠商）") : "（清空）";
+      parts.push(`廠商由「${oldVendorName}」改為「${newVendorName}」`);
+    }
+    if(note) parts.push(`備註：${note}`);
     await sb.from("case_logs").insert({
-      case_id: c.id, action_type:"vendor_change",
-      note: note ? `廠商由「${oldVendorName}」改為「${newVendorName}」，備註：${note}` : `廠商由「${oldVendorName}」改為「${newVendorName}」`,
+      case_id: c.id, action_type: vendorChanged ? "vendor_change" : "status_change",
+      from_status: statusChanged ? c.status : null, to_status: statusChanged ? newStatus : null,
+      note: parts.join("；"),
       created_by: state.profile.id
     });
   }
