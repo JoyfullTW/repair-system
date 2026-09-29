@@ -161,7 +161,7 @@
 </head>
 <body>
 <div id="app"></div>
-<div class="version-badge">admin build 46</div>
+<div class="version-badge">admin build 47</div>
 
 <script>
 /* ============================================================
@@ -235,6 +235,14 @@ function ruleCategoryOptions(selected){
   const extra = (selected && !RULE_CATEGORIES.includes(selected)) ? [selected] : [];
   return [...RULE_CATEGORIES, ...extra].map(c=>`<option value="${c}" ${c===selected?'selected':''}>${c}</option>`).join("");
 }
+
+const MAINTENANCE_TYPES = ["空調","水冷機","送風機","排水系統","消防","靜電機"];
+function addMonths(dateStr, months){
+  if(!dateStr || !months) return null;
+  const d = new Date(dateStr + "T00:00:00");
+  d.setMonth(d.getMonth() + Number(months));
+  return d.toISOString().slice(0,10);
+}
 function requireAdmin(actionLabel){
   if(state.profile?.role !== "admin"){ alert(`只有系統管理者可以${actionLabel}`); return false; }
   return true;
@@ -258,7 +266,7 @@ let state = {
   currentAsset: null, assetFormError: "", assetLogs: [], assetAttachments: [],
   assignmentRules: [], assignmentFilters: { storeId:"", confirmStatus:"" }, assignmentFormError: "", showCopyRulesPanel: false,
   contacts: [], editingStoreId: null, editingContactId: null, generalCategories: [], otherCategoryStats: [], editingVendorId: null, vendorFilterQ: "",
-  infraFilters: { storeId: "" }, infraRecords: [], infraPhotos: {}, sidebarBadges: { newCases: 0, pendingAccounts: 0, overdueCases: 0 },
+  infraFilters: { storeId: "" }, infraRecords: [], infraPhotos: {}, sidebarBadges: { newCases: 0, pendingAccounts: 0, overdueCases: 0, overdueMaintenance: 0 },
   overdueDays: 2,
   storageLimitMb: 1024, storageStats: null,
   manuals: [], manualFilterQ: "", manualFormError: "",
@@ -269,6 +277,9 @@ let state = {
   showArchiveConfirm: false,
   accounts: [],
   vendorFormError: "",
+  maintenanceRows: [], maintenanceFilters: { storeId:"", category:"", dueOnly:false }, maintenanceFormError: "",
+  showMaintenanceForm: false, maintenanceBatchStoreIds: [],
+  relatedParentCase: null, relatedChildCases: [], showDeriveCaseForm: false,
 };
 
 const app = document.getElementById("app");
@@ -346,6 +357,7 @@ function renderSidebar(){
     ...(canManageAccounts ? [{ key:"accounts", label:"帳號管理", ico:"👤", badge: badges.pendingAccounts }] : []),
     { key:"vendors", label:"廠商管理", ico:"🧰" },
     { key:"assignment-rules", label:"廠商指派規則", ico:"🗂️" },
+    { key:"maintenance", label:"定期保養", ico:"🛠️", badge: badges.overdueMaintenance },
   ];
   return `
   <div class="sidebar">
@@ -365,7 +377,7 @@ function renderSidebar(){
 }
 
 function renderTopbar(){
-  const titles = { dashboard:"Dashboard", "case-list":"案件列表", "case-detail":"案件詳情", assets:"資產管理", "asset-detail":"資產詳情", stores:"門市管理", contacts:"通訊錄", infrastructure:"門市基礎設施", manuals:"設備說明書", accounts:"帳號管理", vendors:"廠商管理", "assignment-rules":"廠商指派規則" };
+  const titles = { dashboard:"Dashboard", "case-list":"案件列表", "case-detail":"案件詳情", assets:"資產管理", "asset-detail":"資產詳情", stores:"門市管理", contacts:"通訊錄", infrastructure:"門市基礎設施", manuals:"設備說明書", accounts:"帳號管理", vendors:"廠商管理", "assignment-rules":"廠商指派規則", maintenance:"定期保養" };
   const showBack = state.view === "case-detail" || state.view === "asset-detail";
   return `
   <div class="topbar">
@@ -387,6 +399,7 @@ function renderViewBody(){
   if(state.view === "accounts") return ["general_affairs_supervisor","admin"].includes(state.profile?.role) ? renderAccounts() : `<div class="empty">你沒有權限查看這個頁面</div>`;
   if(state.view === "vendors") return renderVendors();
   if(state.view === "assignment-rules") return renderAssignmentRules();
+  if(state.view === "maintenance") return renderMaintenance();
   return "";
 }
 
@@ -405,6 +418,15 @@ function renderDashboard(){
     { key:"overdue", label:"逾期未更新（廠商追蹤）", n:st.overdue, tone:"warn" },
   ];
   return `
+  ${(state.sidebarBadges?.overdueMaintenance||0) > 0 ? `
+  <div class="card stat-card" data-action="nav-maintenance-due"
+       style="cursor:pointer; margin-bottom:16px; display:flex; align-items:center; justify-content:space-between; background:#FEE4E2; border-color:#B42318;">
+    <div>
+      <div style="font-weight:700; font-size:14px; color:#B42318;">🛠️ 有 ${state.sidebarBadges.overdueMaintenance} 筆定期保養已逾期</div>
+      <div style="font-size:12px; color:var(--ink-soft); margin-top:2px;">點這裡查看是哪些門市、哪個設備需要安排保養</div>
+    </div>
+    <div style="font-size:20px; color:#B42318;">›</div>
+  </div>` : ""}
   ${st.overdue > 0 ? `
   <div class="card stat-card" data-action="nav" data-view="case-list" data-quick="overdue" data-tone="warn"
        style="cursor:pointer; margin-bottom:16px; display:flex; align-items:center; justify-content:space-between; background:#FBF0DD; border-color:var(--warn,#B8860B);">
@@ -573,6 +595,28 @@ function renderCaseDetail(){
         <p style="font-size:13px; color:var(--ink-soft); margin:4px 0;">現場報修人：${c.reporter_name||'—'}（${c.reporter_phone||'—'}）</p>
         <button class="btn btn-outline btn-sm" style="margin-top:10px;" data-action="copy-case-info">📋 複製案件資訊＋照片連結</button>
         <p style="font-size:11px; color:var(--ink-soft); margin-top:6px;">複製後可直接貼到 LINE 群組給廠商，照片連結不需登入即可開啟。</p>
+
+        ${(state.relatedParentCase || (state.relatedChildCases||[]).length > 0) ? `
+        <div style="margin-top:12px; padding:10px; border:1px dashed var(--ink-soft); border-radius:8px;">
+          ${state.relatedParentCase ? `<p style="font-size:12px; margin:0 0 4px;">🔗 衍生自 <span data-action="open-related-case" data-id="${state.relatedParentCase.id}" style="color:var(--primary); text-decoration:underline; cursor:pointer;">#${state.relatedParentCase.case_no}</span>（${state.relatedParentCase.fault_category||''}・${STATUS_LABEL[state.relatedParentCase.status]||state.relatedParentCase.status}）</p>` : ""}
+          ${(state.relatedChildCases||[]).map(rc=>`<p style="font-size:12px; margin:0 0 4px;">🔗 已衍生出 <span data-action="open-related-case" data-id="${rc.id}" style="color:var(--primary); text-decoration:underline; cursor:pointer;">#${rc.case_no}</span>（${rc.fault_category||''}・${STATUS_LABEL[rc.status]||rc.status}）</p>`).join("")}
+        </div>` : ""}
+
+        ${!c.deleted_at ? (!state.showDeriveCaseForm ? `
+        <button class="btn btn-outline btn-sm" style="margin-top:10px;" data-action="start-derive-case">➕ 衍生新案件（同一事件，另一個獨立要修的東西）</button>
+        ` : `
+        <div style="margin-top:12px; padding:10px; border:1px solid var(--primary); border-radius:8px;">
+          <p style="font-size:12px; color:var(--ink-soft); margin:0 0 8px;">會建立一張新案件，帶入同門市／同緊急程度／同報修人，並記錄「衍生自 #${c.case_no}」，方便日後追蹤這是同一次事故牽連出來的。</p>
+          <label class="field-label">新案件的報修設備／項目</label>
+          <input type="text" id="derive-fault-category" placeholder="例如：插座">
+          <label class="field-label">報修原因（選填）</label>
+          <input type="text" id="derive-fault-reason" placeholder="例如：疑似燒壞">
+          <div style="display:flex; gap:8px; margin-top:8px;">
+            <button class="btn btn-primary btn-sm" data-action="confirm-derive-case">建立</button>
+            <button class="btn btn-outline btn-sm" data-action="cancel-derive-case">取消</button>
+          </div>
+        </div>
+        `) : ""}
         ${c.deleted_at ? `
         <div style="margin-top:14px; padding:10px; border:1px solid var(--err,#C13F3F); border-radius:8px; background:#FBEAEA;">
           <p style="font-size:12px; color:var(--err,#C13F3F); font-weight:700; margin:0 0 4px;">🗄 此案件已封存</p>
@@ -1320,6 +1364,109 @@ function renderAssignmentRules(){
   </div>`;
 }
 
+function renderMaintenance(){
+  const f = state.maintenanceFilters;
+  const storeOptions = state.stores.filter(s=>s.status==='active').map(s=>`<option value="${s.id}" ${f.storeId===s.id?'selected':''}>${s.code?('['+s.code+'] '):''}${s.name}</option>`).join("");
+  const vendorOptions = state.vendors.map(v=>`<option value="${v.id}">${v.name}</option>`).join("");
+  const categoryOptions = MAINTENANCE_TYPES.map(c=>`<option value="${c}" ${f.category===c?'selected':''}>${c}</option>`).join("");
+
+  const today = new Date().toISOString().slice(0,10);
+  const soon = addMonths(today, 1);
+
+  let rows = state.maintenanceRows || [];
+  if(f.storeId) rows = rows.filter(r=> r.store_id === f.storeId);
+  if(f.category) rows = rows.filter(r=> r.maintenance_type === f.category);
+  if(f.dueOnly) rows = rows.filter(r=> r.next_suggested_date && r.next_suggested_date <= soon);
+
+  function dueBadge(r){
+    if(!r.next_suggested_date) return `<span style="font-size:11px; color:var(--ink-soft);">未設定週期</span>`;
+    if(r.next_suggested_date < today) return `<span class="status-pill" style="background:#FEE4E2; color:#B42318;">已逾期 ${r.next_suggested_date}</span>`;
+    if(r.next_suggested_date <= soon) return `<span class="status-pill" style="background:#FEF3C7; color:#946200;">即將到期 ${r.next_suggested_date}</span>`;
+    return `<span style="font-size:12px; color:var(--ink-soft);">${r.next_suggested_date}</span>`;
+  }
+
+  const regionGroups = {};
+  state.stores.filter(s=>s.status==='active').forEach(s=>{
+    const regionName = (state.regions||[]).find(r=>r.id===s.region_id)?.name || "未分區";
+    if(!regionGroups[regionName]) regionGroups[regionName] = [];
+    regionGroups[regionName].push(s);
+  });
+
+  return `
+  <div class="filter-bar">
+    <select id="maint-filter-store"><option value="">全部門市</option>${storeOptions}</select>
+    <select id="maint-filter-category"><option value="">全部類型</option>${categoryOptions}</select>
+    <label style="display:flex; align-items:center; gap:6px; font-size:13px; color:var(--ink-soft);">
+      <input type="checkbox" id="maint-filter-due-only" ${f.dueOnly?'checked':''}> 只看即將到期／已逾期
+    </label>
+    <button class="btn btn-outline btn-sm" data-action="apply-maintenance-filters">套用篩選</button>
+    <button class="btn btn-primary btn-sm" data-action="toggle-maintenance-form">${state.showMaintenanceForm ? '取消新增' : '➕ 新增／批次指派保養'}</button>
+  </div>
+
+  ${state.showMaintenanceForm ? `
+  <div class="card" style="border-color:var(--steel, var(--primary));">
+    <div class="section-title" style="margin-top:0;">新增／批次指派定期保養</div>
+    <p style="font-size:12px; color:var(--ink-soft); margin:0 0 12px;">
+      勾選要套用的門市，填好保養類型、廠商與週期後送出，會針對每一間勾選的門市各自新增一筆保養排程。如果同一種保養全台灣大多用同一家廠商、只有少數地區（例如新北市）用另一家，可以分兩次指派：第一次勾選大部分門市指派 A 廠商，第二次只勾新北市的門市指派 B 廠商。
+    </p>
+    <div class="grid grid-4">
+      <div><label class="field-label">保養類型</label><select id="new-maint-category"><option value="">請選擇…</option>${MAINTENANCE_TYPES.map(c=>`<option value="${c}">${c}</option>`).join("")}</select></div>
+      <div><label class="field-label">負責廠商</label><select id="new-maint-vendor"><option value="">請選擇…</option>${vendorOptions}</select></div>
+      <div><label class="field-label">上次保養日期</label><input type="date" id="new-maint-last-date"></div>
+      <div><label class="field-label">保養週期（月）</label><input type="number" id="new-maint-cycle" value="12"></div>
+      <div><label class="field-label">上次費用（選填）</label><input type="number" id="new-maint-cost"></div>
+      <div style="grid-column: span 3;"><label class="field-label">備註（選填）</label><input type="text" id="new-maint-note" placeholder="例如：報價含濾網更換"></div>
+    </div>
+    <label class="field-label" style="margin-top:10px; display:block;">套用門市（可複選，可整區勾選）</label>
+    <div style="max-height:220px; overflow-y:auto; border:1px solid var(--ink-soft); border-radius:8px; padding:10px; display:flex; flex-direction:column; gap:10px;">
+      ${Object.keys(regionGroups).sort().map(regionName=>`
+        <div>
+          <div style="font-size:12px; font-weight:700; color:var(--ink-soft); margin-bottom:4px;">
+            <label style="display:flex; align-items:center; gap:4px; cursor:pointer;">
+              <input type="checkbox" data-action="toggle-maint-region-group" data-region="${regionName}"> ${regionName}（全選／取消）
+            </label>
+          </div>
+          <div style="display:flex; flex-wrap:wrap; gap:6px 14px; padding-left:20px;">
+            ${regionGroups[regionName].map(s=>`
+              <label style="display:flex; align-items:center; gap:4px; font-size:13px; cursor:pointer;">
+                <input type="checkbox" class="maint-store-check" data-region="${regionName}" value="${s.id}"> ${s.code?('['+s.code+'] '):''}${s.name}
+              </label>`).join("")}
+          </div>
+        </div>`).join("")}
+    </div>
+    ${state.maintenanceFormError ? `<div class="error-msg">${state.maintenanceFormError}</div>` : ""}
+    <button class="btn btn-primary btn-sm" style="margin-top:12px;" data-action="save-maintenance-batch">建立保養排程</button>
+  </div>` : ""}
+
+  <div class="card" style="padding:0; overflow-x:auto; margin-top:14px;">
+    <table>
+      <thead><tr><th>門市</th><th>保養類型</th><th>廠商</th><th>上次保養</th><th>週期(月)</th><th>下次建議</th><th>上次費用</th><th>備註</th><th></th></tr></thead>
+      <tbody>
+        ${rows.length===0 ? `<tr><td colspan="9" style="text-align:center; color:var(--ink-soft); padding:30px;">尚無保養排程資料</td></tr>` : rows.map(r=>`
+          <tr data-maint-row="${r.id}">
+            <td style="white-space:nowrap;">${r.store_code?('['+r.store_code+'] '):''}${r.store_name}</td>
+            <td>${r.maintenance_type}</td>
+            <td>
+              <select data-field="vendor_id" style="min-width:130px;">
+                <option value="">未指定</option>
+                ${r.vendor_id ? vendorOptions.replace(`value="${r.vendor_id}"`, `value="${r.vendor_id}" selected`) : vendorOptions}
+              </select>
+            </td>
+            <td><input type="date" data-field="last_date" value="${r.last_date||''}" style="min-width:130px;"></td>
+            <td><input type="number" data-field="cycle_months" value="${r.cycle_months||''}" style="width:70px;"></td>
+            <td>${dueBadge(r)}</td>
+            <td><input type="number" data-field="last_cost" value="${r.last_cost||''}" style="width:90px;"></td>
+            <td><input type="text" data-field="note" value="${r.note||''}" style="min-width:140px;"></td>
+            <td style="white-space:nowrap;">
+              <button class="btn btn-primary btn-sm" data-action="save-maintenance-row" data-id="${r.id}">儲存</button>
+              <button class="btn btn-outline btn-sm" data-action="delete-maintenance-row" data-id="${r.id}">刪除</button>
+            </td>
+          </tr>`).join("")}
+      </tbody>
+    </table>
+  </div>`;
+}
+
 /* ============================================================
    事件綁定
    ============================================================ */
@@ -1418,6 +1565,10 @@ async function onAction(e){
   else if(action === "cancel-archive-case"){ cancelArchiveCase(); }
   else if(action === "confirm-archive-case"){ await confirmArchiveCase(); }
   else if(action === "restore-case"){ await restoreCase(); }
+  else if(action === "start-derive-case"){ startDeriveCase(); }
+  else if(action === "cancel-derive-case"){ cancelDeriveCase(); }
+  else if(action === "confirm-derive-case"){ await confirmDeriveCase(); }
+  else if(action === "open-related-case"){ await openCase(el.dataset.id); }
   else if(action === "upload-attachment"){ triggerAttachmentUpload("case", state.currentCase.id, el.dataset.category); }
   else if(action === "upload-asset-photo"){ triggerAttachmentUpload("asset", state.currentAsset.id, "asset_photo"); }
   else if(action === "quick-add-vendor"){ await quickAddVendor(); }
@@ -1464,6 +1615,20 @@ async function onAction(e){
   else if(action === "copy-assets-from-template"){ await copyAssetsFromTemplate(); }
   else if(action === "toggle-copy-rules-panel"){ state.showCopyRulesPanel = !state.showCopyRulesPanel; render(); }
   else if(action === "copy-rules-from-template"){ await copyRulesFromTemplate(); }
+  else if(action === "nav-maintenance-due"){
+    state.maintenanceFilters = { storeId:"", category:"", dueOnly:true };
+    await goTo("maintenance");
+  }
+  else if(action === "apply-maintenance-filters"){ await applyMaintenanceFilters(); }
+  else if(action === "toggle-maintenance-form"){ toggleMaintenanceForm(); }
+  else if(action === "save-maintenance-batch"){ await saveMaintenanceBatch(); }
+  else if(action === "save-maintenance-row"){ await saveMaintenanceRow(el.dataset.id); }
+  else if(action === "delete-maintenance-row"){ await deleteMaintenanceRow(el.dataset.id); }
+  else if(action === "toggle-maint-region-group"){
+    const region = el.dataset.region;
+    const checked = el.checked;
+    document.querySelectorAll(`.maint-store-check[data-region="${region}"]`).forEach(cb=> cb.checked = checked);
+  }
   else if(action === "reset-password"){ await resetPassword(el.dataset.id, el.dataset.name); }
   else if(action === "add-general-category"){ await addGeneralCategory(); }
   else if(action === "fill-general-category"){
@@ -1566,6 +1731,11 @@ async function loadSidebarBadgeCounts(){
     } else {
       state.sidebarBadges.pendingAccounts = 0;
     }
+
+    const { count: overdueMaintenance } = await sb.from("maintenance_schedules")
+      .select("id", { count:"exact", head:true })
+      .lt("next_suggested_date", new Date().toISOString().slice(0,10));
+    state.sidebarBadges.overdueMaintenance = overdueMaintenance || 0;
   }catch(e){ /* 提醒數字載入失敗不影響其他功能 */ }
   render();
 }
@@ -1584,6 +1754,15 @@ async function loadRegions(){
 async function loadVendors(){
   const { data } = await sb.from("vendors").select("*").order("name");
   state.vendors = data || [];
+}
+async function loadMaintenanceRows(){
+  const f = state.maintenanceFilters;
+  let q = sb.from("maintenance_schedules").select("*, stores(name, code, region_id), vendors(name)").order("next_suggested_date", { ascending: true, nullsFirst: true });
+  if(f.storeId) q = q.eq("store_id", f.storeId);
+  if(f.category) q = q.eq("maintenance_type", f.category);
+  const { data, error } = await q;
+  if(error){ alert("載入失敗：" + error.message); return; }
+  state.maintenanceRows = (data||[]).map(r=>({ ...r, store_name: r.stores?.name||"", store_code: r.stores?.code||"", vendor_name: r.vendors?.name||"" }));
 }
 
 async function loadAssetMajorCategories(){
@@ -2164,6 +2343,7 @@ async function goTo(view){
   else if(view === "accounts"){ await loadRegions(); await loadAccounts(); }
   else if(view === "vendors") await loadVendors();
   else if(view === "assignment-rules") await loadVendors();
+  else if(view === "maintenance"){ await loadStores(); await loadVendors(); await loadRegions(); await loadMaintenanceRows(); }
   await loadSidebarBadgeCounts();
   render();
 }
@@ -2181,6 +2361,67 @@ async function openCase(id){
   loadCaseLogs(id);
   loadCaseAttachments(id);
   loadCaseVendorSuggestions(data);
+  loadRelatedCases(data);
+}
+
+// 同一次事故牽連出的多筆獨立案件（例如插座燒壞連帶微波爐壞掉）：載入來源案件＋衍生案件，方便互相追蹤
+async function loadRelatedCases(caseData){
+  state.relatedParentCase = null;
+  state.relatedChildCases = [];
+  if(caseData.related_case_id){
+    const { data } = await sb.from("cases").select("id, case_no, fault_category, status").eq("id", caseData.related_case_id).maybeSingle();
+    state.relatedParentCase = data || null;
+  }
+  const { data: children } = await sb.from("cases").select("id, case_no, fault_category, status").eq("related_case_id", caseData.id);
+  state.relatedChildCases = children || [];
+  if(state.view === "case-detail") render();
+}
+
+function startDeriveCase(){
+  const c = state.currentCase;
+  if(!c) return;
+  state.newDerivedCaseNote = "";
+  state.showDeriveCaseForm = true;
+  render();
+}
+
+function cancelDeriveCase(){
+  state.showDeriveCaseForm = false;
+  render();
+}
+
+async function confirmDeriveCase(){
+  const c = state.currentCase;
+  if(!c) return;
+  const faultCategory = (document.getElementById("derive-fault-category")?.value || "").trim();
+  if(!faultCategory){ alert("請填寫新案件的報修設備／項目"); return; }
+  const payload = {
+    store_id: c.store_id,
+    repair_type: c.asset_id ? "asset" : "general",
+    asset_id: c.asset_id || null,
+    general_category: c.general_category || null,
+    fault_category: faultCategory,
+    fault_reason: document.getElementById("derive-fault-reason")?.value || null,
+    fault_description: `由 #${c.case_no} 衍生的相關案件`,
+    urgency: c.urgency,
+    status: "new",
+    reporter_name: c.reporter_name,
+    reporter_phone: c.reporter_phone,
+    report_date: c.report_date,
+    related_case_id: c.id,
+    created_by: state.profile.id
+  };
+  const { data, error } = await sb.from("cases").insert(payload).select("id").single();
+  if(error){ alert("建立失敗：" + error.message); return; }
+  await sb.from("case_logs").insert({
+    case_id: data.id, action_type:"created",
+    note: `由 #${c.case_no} 衍生的相關案件`,
+    created_by: state.profile.id
+  });
+  state.showDeriveCaseForm = false;
+  await loadSidebarBadgeCounts();
+  await openCase(data.id);
+  alert("✅ 已建立衍生案件，請補齊詳細資訊");
 }
 
 async function loadCaseVendorSuggestions(caseData){
@@ -2357,6 +2598,19 @@ async function saveCase(btn){
       case_id: c.id, action_type:"status_change",
       from_status: c.status, to_status: newStatus,
       note: note || `狀態更新為「${STATUS_LABEL[newStatus]}」`,
+      created_by: state.profile.id
+    });
+  }
+
+  // 廠商異動時，保留當時的判斷／處理經過，不因為換廠商就讓之前的紀錄消失
+  const oldVendorId = c.vendor_id || null;
+  const newVendorId = updates.vendor_id || null;
+  if(oldVendorId !== newVendorId){
+    const oldVendorName = oldVendorId ? (state.vendors.find(v=>v.id===oldVendorId)?.name || "（未知廠商）") : "（尚未指定）";
+    const newVendorName = newVendorId ? (state.vendors.find(v=>v.id===newVendorId)?.name || "（未知廠商）") : "（清空）";
+    await sb.from("case_logs").insert({
+      case_id: c.id, action_type:"vendor_change",
+      note: note ? `廠商由「${oldVendorName}」改為「${newVendorName}」，備註：${note}` : `廠商由「${oldVendorName}」改為「${newVendorName}」`,
       created_by: state.profile.id
     });
   }
@@ -2884,6 +3138,87 @@ async function saveRule(id){
   const { error } = await sb.from("vendor_assignment_rules").update(payload).eq("id", id);
   if(error){ alert("儲存失敗：" + error.message); return; }
   await loadAssignmentRules();
+  render();
+}
+
+function toggleMaintenanceForm(){
+  state.showMaintenanceForm = !state.showMaintenanceForm;
+  state.maintenanceFormError = "";
+  render();
+}
+
+async function applyMaintenanceFilters(){
+  state.maintenanceFilters.storeId = document.getElementById("maint-filter-store")?.value || "";
+  state.maintenanceFilters.category = document.getElementById("maint-filter-category")?.value || "";
+  state.maintenanceFilters.dueOnly = document.getElementById("maint-filter-due-only")?.checked || false;
+  render();
+}
+
+async function saveMaintenanceBatch(){
+  const category = document.getElementById("new-maint-category")?.value || "";
+  const vendorId = document.getElementById("new-maint-vendor")?.value || null;
+  const lastDate = document.getElementById("new-maint-last-date")?.value || null;
+  const cycleMonths = document.getElementById("new-maint-cycle")?.value ? Number(document.getElementById("new-maint-cycle").value) : null;
+  const lastCost = document.getElementById("new-maint-cost")?.value ? Number(document.getElementById("new-maint-cost").value) : null;
+  const note = document.getElementById("new-maint-note")?.value || null;
+  const storeIds = Array.from(document.querySelectorAll(".maint-store-check:checked")).map(cb=>cb.value);
+
+  if(!category){ state.maintenanceFormError = "請選擇保養類型"; render(); return; }
+  if(storeIds.length===0){ state.maintenanceFormError = "請至少勾選一間門市"; render(); return; }
+
+  const { data: existing } = await sb.from("maintenance_schedules").select("store_id")
+    .eq("maintenance_type", category).in("store_id", storeIds);
+  const existingSet = new Set((existing||[]).map(e=>e.store_id));
+  const newStoreIds = storeIds.filter(id=>!existingSet.has(id));
+
+  if(newStoreIds.length === 0){
+    state.maintenanceFormError = "勾選的門市都已經有這個保養類型的排程了，請到下面列表直接編輯既有的";
+    render(); return;
+  }
+
+  const nextDate = addMonths(lastDate, cycleMonths);
+  const rows = newStoreIds.map(storeId=>({
+    store_id: storeId, maintenance_type: category, vendor_id: vendorId,
+    last_date: lastDate, cycle_months: cycleMonths, next_suggested_date: nextDate,
+    last_cost: lastCost, note
+  }));
+
+  const { error } = await sb.from("maintenance_schedules").insert(rows);
+  if(error){ state.maintenanceFormError = "新增失敗：" + error.message; render(); return; }
+
+  state.maintenanceFormError = "";
+  state.showMaintenanceForm = false;
+  await loadMaintenanceRows();
+  await loadSidebarBadgeCounts();
+  render();
+  const skipped = storeIds.length - newStoreIds.length;
+  alert(`✅ 已為 ${newStoreIds.length} 間門市建立「${category}」保養排程${skipped>0 ? `（另外 ${skipped} 間門市已有排程，未重複建立）` : ""}`);
+}
+
+async function saveMaintenanceRow(id){
+  const row = document.querySelector(`tr[data-maint-row="${id}"]`);
+  const vendorId = row.querySelector('[data-field="vendor_id"]').value || null;
+  const lastDate = row.querySelector('[data-field="last_date"]').value || null;
+  const cycleMonths = row.querySelector('[data-field="cycle_months"]').value ? Number(row.querySelector('[data-field="cycle_months"]').value) : null;
+  const lastCost = row.querySelector('[data-field="last_cost"]').value ? Number(row.querySelector('[data-field="last_cost"]').value) : null;
+  const note = row.querySelector('[data-field="note"]').value || null;
+  const nextDate = addMonths(lastDate, cycleMonths);
+  const { error } = await sb.from("maintenance_schedules").update({
+    vendor_id: vendorId, last_date: lastDate, cycle_months: cycleMonths,
+    next_suggested_date: nextDate, last_cost: lastCost, note, updated_at: new Date().toISOString()
+  }).eq("id", id);
+  if(error){ alert("儲存失敗：" + error.message); return; }
+  await loadMaintenanceRows();
+  await loadSidebarBadgeCounts();
+  render();
+}
+
+async function deleteMaintenanceRow(id){
+  if(!confirm("確定要刪除這筆保養排程嗎？")) return;
+  const { error } = await sb.from("maintenance_schedules").delete().eq("id", id);
+  if(error){ alert("刪除失敗：" + error.message); return; }
+  await loadMaintenanceRows();
+  await loadSidebarBadgeCounts();
   render();
 }
 
