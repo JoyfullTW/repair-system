@@ -161,7 +161,7 @@
 </head>
 <body>
 <div id="app"></div>
-<div class="version-badge">admin build 48</div>
+<div class="version-badge">admin build 49</div>
 
 <script>
 /* ============================================================
@@ -721,11 +721,15 @@ function renderCaseDetail(){
 
       <div class="card" style="margin-top:14px;">
         <div class="section-title" style="margin-top:0;">處理歷程</div>
+        ${state.profile?.role === 'admin' ? `<p style="font-size:11px; color:var(--ink-soft); margin:-4px 0 10px;">💡 紀錄寫錯建議用「補一筆更正說明」保留痕跡，右側的刪除是給真的誤植、需要清掉的最後手段（僅系統管理者可見）。</p>` : ""}
         ${state.caseLogs.length===0 ? `<p style="font-size:12px; color:var(--ink-soft);">尚無紀錄</p>` :
           state.caseLogs.map(l=>`
-            <div class="timeline-item">
-              <div class="t">${new Date(l.created_at).toLocaleString('zh-TW')}</div>
-              <div>${l.note || l.action_type}</div>
+            <div class="timeline-item" style="display:flex; justify-content:space-between; align-items:flex-start; gap:10px;">
+              <div style="flex:1;">
+                <div class="t">${new Date(l.created_at).toLocaleString('zh-TW')}</div>
+                <div>${l.note || l.action_type}</div>
+              </div>
+              ${state.profile?.role === 'admin' ? `<button type="button" class="btn btn-outline btn-sm" data-action="delete-case-log" data-id="${l.id}" title="刪除這筆歷程紀錄（建議優先用補一筆更正說明）" style="flex-shrink:0; color:var(--err,#C13F3F); border-color:var(--err,#C13F3F);">🗑</button>` : ""}
             </div>`).join("")}
       </div>
     </div>
@@ -1569,6 +1573,7 @@ async function onAction(e){
   else if(action === "cancel-derive-case"){ cancelDeriveCase(); }
   else if(action === "confirm-derive-case"){ await confirmDeriveCase(); }
   else if(action === "open-related-case"){ await openCase(el.dataset.id); }
+  else if(action === "delete-case-log"){ await deleteCaseLog(el.dataset.id); }
   else if(action === "upload-attachment"){ triggerAttachmentUpload("case", state.currentCase.id, el.dataset.category); }
   else if(action === "upload-asset-photo"){ triggerAttachmentUpload("asset", state.currentAsset.id, "asset_photo"); }
   else if(action === "quick-add-vendor"){ await quickAddVendor(); }
@@ -2518,6 +2523,14 @@ async function loadCaseVendorSuggestions(caseData){
   }
 
   if(state.view === "case-detail") render();
+}
+
+async function deleteCaseLog(logId){
+  if(state.profile?.role !== "admin"){ alert("只有系統管理者可以刪除歷程紀錄"); return; }
+  if(!confirm("這筆歷程紀錄刪除後無法復原。\n\n提醒：如果只是紀錄寫錯，建議改用「補一筆更正說明」保留痕跡會更好。\n\n確定要直接刪除這筆紀錄嗎？")) return;
+  const { error } = await sb.from("case_logs").delete().eq("id", logId);
+  if(error){ alert("刪除失敗：" + error.message); return; }
+  await loadCaseLogs(state.currentCase.id);
 }
 
 async function loadCaseLogs(caseId){
