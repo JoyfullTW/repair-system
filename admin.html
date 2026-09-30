@@ -161,7 +161,7 @@
 </head>
 <body>
 <div id="app"></div>
-<div class="version-badge">admin build 49</div>
+<div class="version-badge">admin build 50</div>
 
 <script>
 /* ============================================================
@@ -2608,7 +2608,9 @@ async function saveCase(btn){
 
   // 一次儲存裡「狀態變更／廠商異動／備註」只合併寫成一筆歷程，避免同一次操作被拆成好幾筆內容重複的紀錄
   const statusChanged = newStatus !== c.status;
-  const oldVendorId = c.vendor_id || null;
+  // 案件開啟時如果還沒有指定廠商，畫面會自動帶入一個「建議廠商」方便選填，但那只是還沒存檔的建議、不是真的已指派過的廠商，
+  // 所以比對「原本的廠商」時不採用這個自動帶入值，避免歷程一直出現這個沒意義的預設廠商名稱
+  const oldVendorId = state.caseVendorAutoFilled ? null : (c.vendor_id || null);
   const newVendorId = updates.vendor_id || null;
   const vendorChanged = oldVendorId !== newVendorId;
 
@@ -2616,9 +2618,13 @@ async function saveCase(btn){
     const parts = [];
     if(statusChanged) parts.push(`狀態更新為「${STATUS_LABEL[newStatus]}」`);
     if(vendorChanged){
-      const oldVendorName = oldVendorId ? (state.vendors.find(v=>v.id===oldVendorId)?.name || "（未知廠商）") : "（尚未指定）";
       const newVendorName = newVendorId ? (state.vendors.find(v=>v.id===newVendorId)?.name || "（未知廠商）") : "（清空）";
-      parts.push(`廠商由「${oldVendorName}」改為「${newVendorName}」`);
+      if(oldVendorId){
+        const oldVendorName = state.vendors.find(v=>v.id===oldVendorId)?.name || "（未知廠商）";
+        parts.push(`廠商由「${oldVendorName}」改為「${newVendorName}」`);
+      } else {
+        parts.push(`廠商設定為「${newVendorName}」`);
+      }
     }
     if(note) parts.push(`備註：${note}`);
     await sb.from("case_logs").insert({
