@@ -161,7 +161,7 @@
 </head>
 <body>
 <div id="app"></div>
-<div class="version-badge">admin build 50</div>
+<div class="version-badge">admin build 51</div>
 
 <script>
 /* ============================================================
@@ -510,7 +510,7 @@ function renderCaseList(){
   <div class="card" style="padding:0; overflow-x:auto;">
     <table>
       <thead><tr>
-        <th>案件編號</th><th>門市</th><th>設備/類別</th><th>緊急</th><th>狀態</th><th>建立時間</th><th></th>
+        <th>案件編號</th><th>門市</th><th>設備/類別</th><th>緊急</th><th>狀態</th><th>報告日期</th><th></th>
       </tr></thead>
       <tbody>
         ${rows.length===0 ? `<tr><td colspan="7" style="text-align:center; color:var(--ink-soft); padding:30px;">目前沒有符合條件的案件</td></tr>` : rows.map(c=>`
@@ -520,7 +520,7 @@ function renderCaseList(){
             <td>${c.fault_category||c.general_category||''}${c.repeat_fault?' <span class="repeat-badge">重複</span>':''}</td>
             <td><span class="status-pill" data-urgency="${c.urgency}">${URGENCY_LABEL[c.urgency]||''}</span></td>
             <td><span class="status-pill">${STATUS_LABEL[c.status]||c.status}</span>${c.deleted_at ? ' <span class="repeat-badge" style="background:#C13F3F;">🗄 已封存</span>' : ''}</td>
-            <td class="mono" style="font-size:12px; color:var(--ink-soft);">${new Date(c.created_at).toLocaleString('zh-TW',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'})}</td>
+            <td class="mono" style="font-size:12px; color:var(--ink-soft);">${c.report_date ? new Date(c.report_date+'T00:00:00').toLocaleDateString('zh-TW',{year:'numeric',month:'2-digit',day:'2-digit'}) : new Date(c.created_at).toLocaleDateString('zh-TW',{month:'2-digit',day:'2-digit'})}</td>
             <td>›</td>
           </tr>`).join("")}
       </tbody>
@@ -2211,7 +2211,9 @@ function printCaseListAdmin(){
 
 async function loadCases(){
   const f = state.caseFilters;
-  let q = scopedCaseQuery(sb.from("cases").select("*, stores(name)").order("created_at", { ascending:false }).limit(200));
+  // 用「報告日期」排序，不是用「建檔時間」：這樣補登的舊案件會照它實際發生的日期排列，
+  // 不會因為今天才輸入系統，就被排到最上面、蓋過真正今天發生的新案件
+  let q = scopedCaseQuery(sb.from("cases").select("*, stores(name)").order("report_date", { ascending:false }).order("created_at", { ascending:false }).limit(200));
   if(f.storeId) q = q.eq("store_id", f.storeId);
   if(f.vendorId) q = q.eq("vendor_id", f.vendorId);
   if(f.showArchived){
