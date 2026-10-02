@@ -161,7 +161,7 @@
 </head>
 <body>
 <div id="app"></div>
-<div class="version-badge">admin build 51</div>
+<div class="version-badge">admin build 52</div>
 
 <script>
 /* ============================================================
@@ -2515,9 +2515,12 @@ async function loadCaseVendorSuggestions(caseData){
   state.caseVendorSuggestions = list;
 
   // 案件目前還沒有指定廠商時，自動把最相關的廠商先帶入表單（還沒存檔，需要總務確認後按儲存才會生效）
+  // 只有「這家店真的修過同類設備」或「指派規則的關鍵字有對上」才自動帶入；
+  // 如果只是規則清單裡隨便排第一個（例如還沒人確認過的預設廠商），不帶入，保持「未指定」，
+  // 避免每次打開案件都被塞進一個其實沒有對應關係的廠商
   state.caseVendorAutoFilled = false;
   if(!caseData.vendor_id && state.currentCase && state.currentCase.id === caseData.id){
-    const autoPick = historyMatch[0] || bestMatch[0] || list[0];
+    const autoPick = historyMatch[0] || bestMatch[0];
     if(autoPick){
       state.currentCase.vendor_id = autoPick.id;
       state.caseVendorAutoFilled = true;
