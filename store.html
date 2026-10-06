@@ -217,7 +217,7 @@
     載入中…如果這段文字一直沒有消失，代表網頁程式無法執行，請截圖回報。
   </div>
 </div>
-<div class="version-badge">store build 32</div>
+<div class="version-badge">store build 33</div>
 
 <script>
 /* ============================================================
@@ -1440,11 +1440,24 @@ async function submitReport(){
     reporter_name: s.reporterName,
     reporter_phone: s.reporterPhone,
     urgency: s.urgency,
-    status: "new"
+    status: "new",
+    created_by: state.profile?.id || null
   };
 
   const { data, error } = await sb.from("cases").insert(payload).select().single();
   if(error){ alert("送出失敗：" + error.message); return; }
+
+  // 留下「誰建立的」紀錄，之後總務才查得到是誰、什麼時候送出的
+  try{
+    const who = state.profile?.display_name || "未登入";
+    const roleMap = { store:"門市", general_affairs:"總務", general_affairs_supervisor:"總務主管", admin:"系統管理者", district_manager:"區經理" };
+    const roleTxt = roleMap[state.profile?.role] ? `／${roleMap[state.profile.role]}` : "";
+    await sb.from("case_logs").insert({
+      case_id: data.id, action_type: "created",
+      note: `案件建立（${who}${roleTxt}）`,
+      created_by: state.profile?.id || null
+    });
+  }catch(e){ console.warn("建立紀錄寫入失敗", e); }
 
   const photosToUpload = s.photos.filter(Boolean);
   if(photosToUpload.length > 0){

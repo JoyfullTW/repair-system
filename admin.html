@@ -161,7 +161,7 @@
 </head>
 <body>
 <div id="app"></div>
-<div class="version-badge">admin build 52</div>
+<div class="version-badge">admin build 53</div>
 
 <script>
 /* ============================================================
@@ -2502,12 +2502,23 @@ async function loadCaseVendorSuggestions(caseData){
     });
   }
 
+  // 標籤顯示「這家廠商在這間店最常負責的分類」，而不是排序第一筆規則的分類
+  // （以前按字母排序，POS 會排在「設備」前面，導致很多廠商都被標成 [POS]）
+  const catCount = {};
+  rules.forEach(r=>{
+    catCount[r.vendor_id] = catCount[r.vendor_id] || {};
+    catCount[r.vendor_id][r.category] = (catCount[r.vendor_id][r.category]||0) + 1;
+  });
+  const dominantCat = (vid)=>{
+    const m = catCount[vid] || {};
+    return Object.entries(m).sort((x,y)=> y[1]-x[1])[0]?.[0] || "";
+  };
   const seen = new Set(bestMatchIds);
   const list = [];
   rules.forEach(r=>{
     if(seen.has(r.vendor_id)) return;
     seen.add(r.vendor_id);
-    list.push({ id:r.vendor_id, name:r.vendors.name, vendor_type:r.vendors.vendor_type, category:r.category });
+    list.push({ id:r.vendor_id, name:r.vendors.name, vendor_type:r.vendors.vendor_type, category:dominantCat(r.vendor_id) });
   });
 
   state.caseVendorHistoryMatch = historyMatch;
