@@ -273,7 +273,7 @@
     載入中…如果這段文字一直沒有消失，代表網頁程式無法執行，請截圖回報。
   </div>
 </div>
-<div class="version-badge">store build 34</div>
+<div class="version-badge">store build 35</div>
 
 <script>
 /* ============================================================
@@ -1682,8 +1682,8 @@ async function loadCaseDetailPhotos(caseId){
 }
 
 async function loadCaseTimeline(caseId){
-  const { data, error } = await sb.from("case_logs")
-    .select("*").eq("case_id", caseId).order("created_at", { ascending:true });
+  // 改由資料庫函式取得處理歷程：門市／區經理看到的內容會自動把廠商名稱遮成「廠商」
+  const { data, error } = await sb.rpc("get_case_timeline", { p_case_id: caseId });
   state.caseLogsRaw = error ? [] : (data || []);
   if(state.view === "case-detail") render();
 }
