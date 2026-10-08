@@ -161,7 +161,7 @@
 </head>
 <body>
 <div id="app"></div>
-<div class="version-badge">admin build 54</div>
+<div class="version-badge">admin build 55</div>
 
 <script>
 /* ============================================================
@@ -1568,7 +1568,6 @@ async function onAction(e){
   else if(action === "save-case"){ await saveCase(el); }
   else if(action === "copy-case-info"){ copyCaseInfo(); }
   else if(action === "copy-luoyi-field"){ copyLuoyiField(el.dataset.key, el); }
-  else if(action === "copy-luoyi-all"){ copyLuoyiAll(el); }
   else if(action === "start-archive-case"){ startArchiveCase(); }
   else if(action === "cancel-archive-case"){ cancelArchiveCase(); }
   else if(action === "confirm-archive-case"){ await confirmArchiveCase(); }
@@ -2776,7 +2775,6 @@ function renderLuoyiCard(vendor){
     <p style="font-size:12px; color:var(--ink-soft); margin:0 0 6px;">洛邑的表單不能自動帶入資料，先開啟表單，再逐欄按「複製」貼上即可。</p>
     <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:6px;">
       <a class="btn btn-primary btn-sm" href="${LUOYI_FORM_URL}" target="_blank" rel="noopener" style="text-decoration:none;">開啟洛邑表單 ↗</a>
-      <button class="btn btn-outline btn-sm" data-action="copy-luoyi-all">複製全部（含欄位名稱）</button>
     </div>
     ${rows}
     <p style="font-size:12px; color:var(--warn,#9A6B00); margin:10px 0 0;">⚠️ 表單的「上傳照片或影片」是必填，請從右側附件下載照片後另外上傳（連結欄位只是補充）。</p>
