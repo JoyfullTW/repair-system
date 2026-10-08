@@ -161,7 +161,7 @@
 </head>
 <body>
 <div id="app"></div>
-<div class="version-badge">admin build 53</div>
+<div class="version-badge">admin build 54</div>
 
 <script>
 /* ============================================================
@@ -682,6 +682,8 @@ function renderCaseDetail(){
         <label class="field-label">維修保固期限</label>
         <input type="date" id="edit-warranty" value="${c.warranty_until||''}">
       </div>
+
+      ${renderLuoyiCard(selectedVendorInfo)}
 
       <div class="card" style="margin-top:14px;">
         <div class="section-title" style="margin-top:0;">費用核准／簽呈</div>
@@ -1565,6 +1567,8 @@ async function onAction(e){
   else if(action === "open-case"){ await openCase(el.dataset.id); }
   else if(action === "save-case"){ await saveCase(el); }
   else if(action === "copy-case-info"){ copyCaseInfo(); }
+  else if(action === "copy-luoyi-field"){ copyLuoyiField(el.dataset.key, el); }
+  else if(action === "copy-luoyi-all"){ copyLuoyiAll(el); }
   else if(action === "start-archive-case"){ startArchiveCase(); }
   else if(action === "cancel-archive-case"){ cancelArchiveCase(); }
   else if(action === "confirm-archive-case"){ await confirmArchiveCase(); }
@@ -2368,6 +2372,8 @@ async function openCase(id){
   loadCaseLogs(id);
   loadCaseAttachments(id);
   loadCaseVendorSuggestions(data);
+  state.caseStoreContact = null;
+  loadCaseStoreContact(data.store_id);
   loadRelatedCases(data);
 }
 
@@ -2699,6 +2705,95 @@ async function restoreCase(){
   if(error){ alert("還原失敗：" + error.message); return; }
   await openCase(c.id);
   alert("✅ 已還原此案件");
+}
+
+/* ---------------- 洛邑設計叫修表單（廠商自製網頁，不支援網址預填，所以整理成逐欄複製） ---------------- */
+const LUOYI_FORM_URL = "https://script.google.com/macros/s/AKfycbx93QdH00d4KxvP5FiJW1n74LrmSHM--2xJFKyezj7EeCpLH3zXmQlQFvu8Y64ajTrm/exec";
+
+function escHtmlLuoyi(t){ return String(t==null?'':t).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
+
+async function loadCaseStoreContact(storeId){
+  state.caseStoreContact = null;
+  if(!storeId) return;
+  const { data } = await sb.from("store_contacts").select("*").eq("store_id", storeId).maybeSingle();
+  state.caseStoreContact = data || null;
+  if(state.view === "case-detail") render();
+}
+
+// 依文字猜洛邑表單的「報修類別」，只是建議，總務在表單上仍可自行選擇
+function guessLuoyiCategory(c){
+  const t = [c.fault_category, c.fault_reason, c.fault_description, c.general_category].filter(Boolean).join(" ");
+  if(/漏水|滲水|積水|淹水/.test(t)) return "漏水";
+  if(/沙發|卡座/.test(t)) return "卡座沙發";
+  if(/門|窗|鎖|玻璃|紗窗/.test(t)) return "門窗";
+  if(/系統櫃|櫃|層板|抽屜/.test(t)) return "系統櫃";
+  if(/油漆|粉刷|掉漆/.test(t)) return "油漆";
+  if(/磁磚|泥作|地磚|地板|牆面破/.test(t)) return "泥作";
+  if(/木作|木板|木門|木/.test(t)) return "木作";
+  if(/水龍頭|水管|馬桶|水槽|排水|電|燈|插座|開關|斷路|跳電|線路/.test(t)) return "水電";
+  return "其他";
+}
+
+function buildLuoyiFields(){
+  const c = state.currentCase;
+  const sc = state.caseStoreContact || {};
+  const photos = (state.caseAttachments||[]).filter(a=>a.category==="fault_photo_video").map(a=>a.file_path);
+  const t = [c.fault_category, c.fault_reason, c.fault_description].filter(Boolean).join(" ");
+  let urgency = c.urgency==="urgent" ? "急件" : (c.urgency==="operational" ? "影響使用" : "一般");
+  if(/漏電|冒煙|燒焦|焦味|瓦斯|觸電/.test(t)) urgency = "安全疑慮";
+  const desc = [
+    c.fault_reason ? `報修原因：${c.fault_reason}` : "",
+    c.fault_description ? `目前狀況：${c.fault_description}` : "",
+    c.suspected_cause ? `推測原因：${c.suspected_cause}` : ""
+  ].filter(Boolean).join("\n");
+  return [
+    { key:"name",     label:"客戶姓名",   value: c.reporter_name || sc.contact_name || "" },
+    { key:"phone",    label:"聯絡電話",   value: c.reporter_phone || sc.mobile || sc.phone || "" },
+    { key:"store",    label:"店鋪名稱",   value: `Joyfull珍有福/${c.store_name||""}` },
+    { key:"address",  label:"維修地址",   value: sc.address || "" },
+    { key:"category", label:"報修類別",   value: guessLuoyiCategory(c), hint:"（系統依內容建議，下拉選單請自行確認）" },
+    { key:"urgency",  label:"緊急程度",   value: urgency, hint:"（下拉選單：一般／急件／影響使用／安全疑慮）" },
+    { key:"location", label:"維修位置",   value: c.fault_category || c.general_category || "" },
+    { key:"desc",     label:"維修說明",   value: desc },
+    { key:"photos",   label:"照片/影片連結", value: photos.join(" "), hint: photos.length ? "" : "（這個案件目前沒有故障照片）" },
+    { key:"remark",   label:"其他備註",   value: `珍有福案件編號 ${c.case_no}` }
+  ];
+}
+
+function renderLuoyiCard(vendor){
+  if(!vendor || !/洛邑/.test(vendor.name||"")) return "";
+  const rows = buildLuoyiFields().map(f=>`
+    <div style="padding:8px 0; border-bottom:1px solid var(--border,#e5e2da);">
+      <div style="display:flex; justify-content:space-between; align-items:center; gap:8px;">
+        <span style="font-size:12px; font-weight:700; color:var(--ink-soft);">${f.label}${f.hint?` <span style="font-weight:400;">${f.hint}</span>`:""}</span>
+        <button class="btn btn-outline btn-sm" data-action="copy-luoyi-field" data-key="${f.key}">複製</button>
+      </div>
+      <div style="font-size:13px; margin-top:4px; white-space:pre-wrap; word-break:break-all;">${f.value ? escHtmlLuoyi(f.value) : '<span style="color:var(--err,#C13F3F);">（空白，請手動補）</span>'}</div>
+    </div>`).join("");
+  return `
+  <div class="card" style="margin-top:14px;">
+    <div class="section-title" style="margin-top:0;">📝 洛邑設計叫修表單</div>
+    <p style="font-size:12px; color:var(--ink-soft); margin:0 0 6px;">洛邑的表單不能自動帶入資料，先開啟表單，再逐欄按「複製」貼上即可。</p>
+    <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:6px;">
+      <a class="btn btn-primary btn-sm" href="${LUOYI_FORM_URL}" target="_blank" rel="noopener" style="text-decoration:none;">開啟洛邑表單 ↗</a>
+      <button class="btn btn-outline btn-sm" data-action="copy-luoyi-all">複製全部（含欄位名稱）</button>
+    </div>
+    ${rows}
+    <p style="font-size:12px; color:var(--warn,#9A6B00); margin:10px 0 0;">⚠️ 表單的「上傳照片或影片」是必填，請從右側附件下載照片後另外上傳（連結欄位只是補充）。</p>
+  </div>`;
+}
+
+function copyLuoyiField(key, el){
+  const f = buildLuoyiFields().find(x=>x.key===key);
+  if(!f) return;
+  const done = ()=>{ if(el){ const old = el.textContent; el.textContent = "已複製 ✓"; setTimeout(()=>{ el.textContent = old; }, 1200); } };
+  navigator.clipboard.writeText(f.value||"").then(done).catch(()=>{ prompt("請手動複製：", f.value||""); });
+}
+
+function copyLuoyiAll(el){
+  const text = buildLuoyiFields().map(f=>`${f.label}：${f.value||""}`).join("\n");
+  const done = ()=>{ if(el){ const old = el.textContent; el.textContent = "已複製 ✓"; setTimeout(()=>{ el.textContent = old; }, 1200); } };
+  navigator.clipboard.writeText(text).then(done).catch(()=>{ prompt("請手動複製以下內容：", text); });
 }
 
 function copyCaseInfo(){
