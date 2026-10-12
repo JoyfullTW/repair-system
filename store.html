@@ -273,7 +273,7 @@
     載入中…如果這段文字一直沒有消失，代表網頁程式無法執行，請截圖回報。
   </div>
 </div>
-<div class="version-badge">store build 39</div>
+<div class="version-badge">store build 40</div>
 
 <script>
 function esc(t){ return String(t==null?'':t).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;"); }
@@ -1791,6 +1791,7 @@ async function confirmCaseResult(result){
     store_confirm_result: result,
     status: newStatus,
     closed_at: null,
+    store_reported_done_at: result === "normal" ? new Date().toISOString() : null,
     updated_at: new Date().toISOString()
   }).eq("id", c.id);
   if(error){ alert("更新失敗：" + error.message); return; }
@@ -1813,7 +1814,7 @@ async function reportVendorProgress(kind){
   let newStatus = c.status;
   let note = "";
   if(kind === "done"){
-    newStatus = "pending_store_confirm";
+    newStatus = "repair_done";
     note = "門市回報：廠商已完成維修" + (extra ? `（${extra}）` : "");
   } else if(kind === "parts"){
     newStatus = "pending_parts";
@@ -1824,6 +1825,7 @@ async function reportVendorProgress(kind){
 
   const updates = { updated_at: new Date().toISOString() };
   if(newStatus !== c.status) updates.status = newStatus;
+  if(kind === "done") updates.store_reported_done_at = new Date().toISOString();
   const { error } = await sb.from("cases").update(updates).eq("id", c.id);
   if(error){ alert("回報失敗：" + error.message); return; }
 

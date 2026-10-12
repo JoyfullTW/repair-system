@@ -161,7 +161,7 @@
 </head>
 <body>
 <div id="app"></div>
-<div class="version-badge">admin build 60</div>
+<div class="version-badge">admin build 61</div>
 
 <script>
 function esc(t){ return String(t==null?'':t).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;"); }
@@ -414,8 +414,8 @@ function renderDashboard(){
     { key:"pending", label:"待處理", n:st.pending, tone:"" },
     { key:"pending_info", label:"資料待補", n:st.pendingInfo, tone:"warn" },
     { key:"in_progress", label:"處理中", n:st.inProgress, tone:"" },
-    { key:"pending_confirm", label:"門市回報完工（待確認）", n:st.pendingConfirm, tone:"warn" },
-    { key:"repair_done", label:"待總務結案", n:st.repairDone, tone:"warn" },
+    { key:"pending_confirm", label:"待門市確認", n:st.pendingConfirm, tone:"" },
+    { key:"store_done", label:"🔔 門市回報完工", n:st.storeDone, tone:"warn" },
     { key:"urgent", label:"緊急案件", n:st.urgent, tone:"urgent" },
     { key:"repeat", label:"重複故障", n:st.repeat, tone:"urgent" },
     { key:"overdue", label:"逾期未更新（廠商追蹤）", n:st.overdue, tone:"warn" },
@@ -522,7 +522,7 @@ function renderCaseList(){
             <td>${c.store_name||''}</td>
             <td>${esc(c.fault_category)||esc(c.general_category)||''}${c.repeat_fault?' <span class="repeat-badge">重複</span>':''}</td>
             <td><span class="status-pill" data-urgency="${c.urgency}">${URGENCY_LABEL[c.urgency]||''}</span></td>
-            <td><span class="status-pill"${["pending_store_confirm","repair_done"].includes(c.status)?' style="background:#B45A38; color:#fff;"':''}>${c.status==="repair_done"?"🔔 ":""}${STATUS_LABEL[c.status]||c.status}</span>${c.deleted_at ? ' <span class="repeat-badge" style="background:#C13F3F;">🗄 已封存</span>' : ''}</td>
+            <td><span class="status-pill"${(c.status==="repair_done" && c.store_reported_done_at)?' style="background:#B45A38; color:#fff;"':''}>${(c.status==="repair_done" && c.store_reported_done_at)?"🔔 門市回報 ":""}${STATUS_LABEL[c.status]||c.status}</span>${c.deleted_at ? ' <span class="repeat-badge" style="background:#C13F3F;">🗄 已封存</span>' : ''}</td>
             <td class="mono" style="font-size:12px; color:var(--ink-soft);">${c.report_date ? new Date(c.report_date+'T00:00:00').toLocaleDateString('zh-TW',{year:'numeric',month:'2-digit',day:'2-digit'}) : new Date(c.created_at).toLocaleDateString('zh-TW',{month:'2-digit',day:'2-digit'})}</td>
             <td>›</td>
           </tr>`).join("")}
@@ -575,11 +575,11 @@ function renderCaseDetail(){
   const selectedVendorInfo = c.vendor_id ? state.vendors.find(v=>v.id===c.vendor_id) : null;
 
   let storeBanner = "";
-  if(c.status === "pending_store_confirm" || c.status === "repair_done"){
+  if(c.status === "repair_done" && c.store_reported_done_at){
     const lastLog = [...(state.caseLogs||[])].reverse().find(l=> /^門市(回報|確認)/.test(l.note||"")) || null;
     const when = lastLog ? new Date(lastLog.created_at).toLocaleString('zh-TW') : "";
-    const title = c.status === "repair_done" ? "✅ 門市已確認設備恢復正常，等你確認結案" : "📣 門市回報廠商已完成維修，等門市確認";
-    const hint = c.status === "repair_done" ? "請確認廠商、費用、更換零件都已填寫，再把狀態改為「已結案」並儲存。" : "門市確認後，案件會進入「維修完成」，由你結案。";
+    const title = "🔔 門市回報已完工，設備沒問題";
+    const hint = "請確認廠商、費用、更換零件都已填寫，再把狀態改為「已結案」並儲存。";
     storeBanner = `<div style="background:#FBE3D6; border:2px solid #B45A38; color:#7A3416; border-radius:12px; padding:14px 16px; margin-bottom:14px;">
       <div style="font-size:16px; font-weight:800;">${title}</div>
       ${lastLog ? `<div style="font-size:13px; margin-top:6px;">${when}　${esc(lastLog.note)}</div>` : ""}
@@ -2157,13 +2157,13 @@ async function loadDashboard(){
   const monthStartStr = monthStart.toISOString().slice(0,10);
   if(["general_affairs","general_affairs_supervisor","admin"].includes(state.profile?.role)) loadStorageStats(); // 不用 await，避免拖慢 Dashboard 主要內容載入
 
-  let q = scopedCaseQuery(sb.from("cases").select("status, urgency, repeat_fault, created_at, final_amount, closed_at, updated_at").is("deleted_at", null));
+  let q = scopedCaseQuery(sb.from("cases").select("status, store_reported_done_at, urgency, repeat_fault, created_at, final_amount, closed_at, updated_at").is("deleted_at", null));
   const { data: allCases, error } = await q;
   if(error){ console.error(error); return; }
 
   const { count: pendingAccounts } = await sb.from("users_profile").select("id", { count:"exact", head:true }).eq("status","disabled");
 
-  const stats = { today:0, pending:0, pendingInfo:0, inProgress:0, pendingConfirm:0, repairDone:0, urgent:0, repeat:0, overdue:0, monthClosed:0, monthCost:0, pendingAccounts: pendingAccounts||0 };
+  const stats = { today:0, pending:0, pendingInfo:0, inProgress:0, pendingConfirm:0, storeDone:0, urgent:0, repeat:0, overdue:0, monthClosed:0, monthCost:0, pendingAccounts: pendingAccounts||0 };
   const inProgressSet = new Set(STATUS_GROUPS[1].options);
   const overdueEligibleSet = new Set(OVERDUE_ELIGIBLE_STATUSES);
   const overdueCutoff = overdueCutoffIso();
@@ -2173,7 +2173,7 @@ async function loadDashboard(){
     if(c.status === "pending_info") stats.pendingInfo++;
     if(inProgressSet.has(c.status)) stats.inProgress++;
     if(c.status === "pending_store_confirm") stats.pendingConfirm++;
-    if(c.status === "repair_done") stats.repairDone++;
+    if(c.status === "repair_done" && c.store_reported_done_at) stats.storeDone++;
     if(c.urgency === "urgent" && !["closed","cancelled"].includes(c.status)) stats.urgent++;
     if(c.repeat_fault && !["closed","cancelled"].includes(c.status)) stats.repeat++;
     if(overdueEligibleSet.has(c.status) && c.updated_at && c.updated_at < overdueCutoff) stats.overdue++;
@@ -2247,7 +2247,8 @@ async function loadCases(){
       q = q.in("status", OVERDUE_ELIGIBLE_STATUSES).lt("updated_at", overdueCutoffIso());
     } else {
       if(f.status) q = q.eq("status", f.status);
-      else if(f.hideClosed) q = q.not("status", "in", "(closed,cancelled)");
+      if(f.storeDoneOnly) q = q.not("store_reported_done_at", "is", null);
+      else if(f.hideClosed && !f.status) q = q.not("status", "in", "(closed,cancelled)");
     }
   }
   if(f.urgency) q = q.eq("urgency", f.urgency);
@@ -2262,7 +2263,7 @@ function applyQuickFilter(key){
   if(key === "pending") f.status = "new";
   if(key === "pending_info") f.status = "pending_info";
   if(key === "pending_confirm") f.status = "pending_store_confirm";
-  if(key === "repair_done") f.status = "repair_done";
+  if(key === "store_done"){ f.status = "repair_done"; f.storeDoneOnly = true; }
   if(key === "urgent") f.urgency = "urgent";
   if(key === "overdue") f.overdueOnly = true;
   state.caseFilters = f;
@@ -2276,6 +2277,7 @@ async function applyCaseFilters(){
   state.caseFilters.q = document.getElementById("filter-q")?.value || "";
   state.caseFilters.hideClosed = !(document.getElementById("filter-show-closed")?.checked);
   state.caseFilters.showArchived = !!(document.getElementById("filter-show-archived")?.checked);
+  state.caseFilters.storeDoneOnly = false;
   state.caseFilters.overdueOnly = false; // 手動套用篩選時，離開「只看逾期」快速篩選
   await loadCases();
   render();
