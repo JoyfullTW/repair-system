@@ -273,7 +273,7 @@
     載入中…如果這段文字一直沒有消失，代表網頁程式無法執行，請截圖回報。
   </div>
 </div>
-<div class="version-badge">store build 40</div>
+<div class="version-badge">store build 41</div>
 
 <script>
 function esc(t){ return String(t==null?'':t).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;"); }
@@ -1743,7 +1743,7 @@ function printCaseList(){
 }
 
 async function loadMyCases(){
-  let query = sb.from("cases").select("*, assets(name), stores(name)").order("created_at", { ascending:false });
+  let query = sb.from("cases").select("*, assets(name), stores(name)").is("deleted_at", null).order("created_at", { ascending:false });
   if(state.storeId){
     query = query.eq("store_id", state.storeId);
   }else if(state.myCasesStoreFilter){
