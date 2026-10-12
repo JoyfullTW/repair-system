@@ -161,9 +161,11 @@
 </head>
 <body>
 <div id="app"></div>
-<div class="version-badge">admin build 57</div>
+<div class="version-badge">admin build 59</div>
 
 <script>
+function esc(t){ return String(t==null?'':t).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;"); }
+
 /* ============================================================
    Supabase 設定 — 與 store.html 共用同一組專案設定
    ============================================================ */
@@ -369,7 +371,7 @@ function renderSidebar(){
       </div>`).join("")}
     <div class="spacer"></div>
     <div class="who">
-      <b>${state.profile?.display_name || ""}</b>
+      <b>${esc(state.profile?.display_name) || ""}</b>
       ${ROLE_LABEL[state.profile?.role] || ""}
       <div style="margin-top:8px;"><span class="logout-link" data-action="do-logout">登出</span></div>
     </div>
@@ -412,7 +414,8 @@ function renderDashboard(){
     { key:"pending", label:"待處理", n:st.pending, tone:"" },
     { key:"pending_info", label:"資料待補", n:st.pendingInfo, tone:"warn" },
     { key:"in_progress", label:"處理中", n:st.inProgress, tone:"" },
-    { key:"pending_confirm", label:"待門市確認", n:st.pendingConfirm, tone:"" },
+    { key:"pending_confirm", label:"門市回報完工（待確認）", n:st.pendingConfirm, tone:"warn" },
+    { key:"repair_done", label:"待總務結案", n:st.repairDone, tone:"warn" },
     { key:"urgent", label:"緊急案件", n:st.urgent, tone:"urgent" },
     { key:"repeat", label:"重複故障", n:st.repeat, tone:"urgent" },
     { key:"overdue", label:"逾期未更新（廠商追蹤）", n:st.overdue, tone:"warn" },
@@ -517,7 +520,7 @@ function renderCaseList(){
           <tr class="row-clickable" data-action="open-case" data-id="${c.id}">
             <td class="case-no">#${c.case_no}</td>
             <td>${c.store_name||''}</td>
-            <td>${c.fault_category||c.general_category||''}${c.repeat_fault?' <span class="repeat-badge">重複</span>':''}</td>
+            <td>${esc(c.fault_category)||esc(c.general_category)||''}${c.repeat_fault?' <span class="repeat-badge">重複</span>':''}</td>
             <td><span class="status-pill" data-urgency="${c.urgency}">${URGENCY_LABEL[c.urgency]||''}</span></td>
             <td><span class="status-pill">${STATUS_LABEL[c.status]||c.status}</span>${c.deleted_at ? ' <span class="repeat-badge" style="background:#C13F3F;">🗄 已封存</span>' : ''}</td>
             <td class="mono" style="font-size:12px; color:var(--ink-soft);">${c.report_date ? new Date(c.report_date+'T00:00:00').toLocaleDateString('zh-TW',{year:'numeric',month:'2-digit',day:'2-digit'}) : new Date(c.created_at).toLocaleDateString('zh-TW',{month:'2-digit',day:'2-digit'})}</td>
@@ -578,7 +581,7 @@ function renderCaseDetail(){
         <div style="display:flex; justify-content:space-between; align-items:flex-start;">
           <div>
             <div class="case-no" style="font-size:14px;">#${c.case_no}</div>
-            <h2 style="margin-top:4px;">${c.fault_category || c.general_category || '報修案件'}</h2>
+            <h2 style="margin-top:4px;">${esc(c.fault_category) || esc(c.general_category) || '報修案件'}</h2>
           </div>
           <div style="text-align:right;">
             <span class="status-pill" data-urgency="${c.urgency}">${URGENCY_LABEL[c.urgency]}</span>
@@ -588,18 +591,18 @@ function renderCaseDetail(){
         <div class="section-title">基本資訊</div>
         <p style="font-size:13px; color:var(--ink-soft); margin:4px 0;">門市：${c.store_name||''}</p>
         <p style="font-size:13px; color:var(--ink-soft); margin:4px 0;">報告日期：${c.report_date||'—'}</p>
-        <p style="font-size:13px; color:var(--ink-soft); margin:4px 0;">報修設備：${c.fault_category||'—'}</p>
-        <p style="font-size:13px; color:var(--ink-soft); margin:4px 0;">報修原因：${c.fault_reason||'—'}</p>
-        <p style="font-size:13px; color:var(--ink-soft); margin:4px 0;">推測原因：${c.suspected_cause||'—'}</p>
-        <p style="font-size:13px; color:var(--ink-soft); margin:4px 0;">目前狀況：${c.fault_description||'—'}</p>
-        <p style="font-size:13px; color:var(--ink-soft); margin:4px 0;">現場報修人：${c.reporter_name||'—'}（${c.reporter_phone||'—'}）</p>
+        <p style="font-size:13px; color:var(--ink-soft); margin:4px 0;">報修設備：${esc(c.fault_category)||'—'}</p>
+        <p style="font-size:13px; color:var(--ink-soft); margin:4px 0;">報修原因：${esc(c.fault_reason)||'—'}</p>
+        <p style="font-size:13px; color:var(--ink-soft); margin:4px 0;">推測原因：${esc(c.suspected_cause)||'—'}</p>
+        <p style="font-size:13px; color:var(--ink-soft); margin:4px 0;">目前狀況：${esc(c.fault_description)||'—'}</p>
+        <p style="font-size:13px; color:var(--ink-soft); margin:4px 0;">現場報修人：${esc(c.reporter_name)||'—'}（${esc(c.reporter_phone)||'—'}）</p>
         <button class="btn btn-outline btn-sm" style="margin-top:10px;" data-action="copy-case-info">📋 複製案件資訊＋照片連結</button>
         <p style="font-size:11px; color:var(--ink-soft); margin-top:6px;">複製後可直接貼到 LINE 群組給廠商，照片連結不需登入即可開啟。</p>
 
         ${(state.relatedParentCase || (state.relatedChildCases||[]).length > 0) ? `
         <div style="margin-top:12px; padding:10px; border:1px dashed var(--ink-soft); border-radius:8px;">
-          ${state.relatedParentCase ? `<p style="font-size:12px; margin:0 0 4px;">🔗 衍生自 <span data-action="open-related-case" data-id="${state.relatedParentCase.id}" style="color:var(--primary); text-decoration:underline; cursor:pointer;">#${state.relatedParentCase.case_no}</span>（${state.relatedParentCase.fault_category||''}・${STATUS_LABEL[state.relatedParentCase.status]||state.relatedParentCase.status}）</p>` : ""}
-          ${(state.relatedChildCases||[]).map(rc=>`<p style="font-size:12px; margin:0 0 4px;">🔗 已衍生出 <span data-action="open-related-case" data-id="${rc.id}" style="color:var(--primary); text-decoration:underline; cursor:pointer;">#${rc.case_no}</span>（${rc.fault_category||''}・${STATUS_LABEL[rc.status]||rc.status}）</p>`).join("")}
+          ${state.relatedParentCase ? `<p style="font-size:12px; margin:0 0 4px;">🔗 衍生自 <span data-action="open-related-case" data-id="${state.relatedParentCase.id}" style="color:var(--primary); text-decoration:underline; cursor:pointer;">#${state.relatedParentCase.case_no}</span>（${esc(state.relatedParentCase.fault_category)||''}・${STATUS_LABEL[state.relatedParentCase.status]||state.relatedParentCase.status}）</p>` : ""}
+          ${(state.relatedChildCases||[]).map(rc=>`<p style="font-size:12px; margin:0 0 4px;">🔗 已衍生出 <span data-action="open-related-case" data-id="${rc.id}" style="color:var(--primary); text-decoration:underline; cursor:pointer;">#${rc.case_no}</span>（${esc(rc.fault_category)||''}・${STATUS_LABEL[rc.status]||rc.status}）</p>`).join("")}
         </div>` : ""}
 
         ${!c.deleted_at ? (!state.showDeriveCaseForm ? `
@@ -698,14 +701,14 @@ function renderCaseDetail(){
         ${["general_affairs_supervisor","admin"].includes(state.profile?.role) ? `
         <div class="checkbox-row"><input type="checkbox" id="edit-manager-approved" ${c.manager_approved?'checked':''}><label for="edit-manager-approved">已獲協理同意</label></div>
         <label class="field-label">同意備註</label>
-        <input type="text" id="edit-manager-note" value="${c.manager_approved_note||''}" placeholder="例如：8/28 電話確認">
+        <input type="text" id="edit-manager-note" value="${esc(c.manager_approved_note)||''}" placeholder="例如：8/28 電話確認">
         ` : `
         <div class="checkbox-row"><input type="checkbox" disabled ${c.manager_approved?'checked':''}><label>已獲協理同意${c.manager_approved ? '' : '（尚未核准，只有總務主管／系統管理者能核准）'}</label></div>
-        ${c.manager_approved_note ? `<p style="font-size:12px; color:var(--ink-soft); margin:4px 0 0;">同意備註：${c.manager_approved_note}</p>` : ``}
+        ${c.manager_approved_note ? `<p style="font-size:12px; color:var(--ink-soft); margin:4px 0 0;">同意備註：${esc(c.manager_approved_note)}</p>` : ``}
         `}
       </div>
       <input type="hidden" id="edit-manager-approved-readonly" value="${c.manager_approved ? '1' : '0'}">
-      <input type="hidden" id="edit-manager-note-readonly" value="${(c.manager_approved_note||'').replace(/"/g,'&quot;')}">
+      <input type="hidden" id="edit-manager-note-readonly" value="${(esc(c.manager_approved_note)||'').replace(/"/g,'&quot;')}">
 
       <div class="card" style="margin-top:14px;">
         <label class="field-label">本次更新備註（會記錄到處理歷程）</label>
@@ -729,7 +732,7 @@ function renderCaseDetail(){
             <div class="timeline-item" style="display:flex; justify-content:space-between; align-items:flex-start; gap:10px;">
               <div style="flex:1;">
                 <div class="t">${new Date(l.created_at).toLocaleString('zh-TW')}</div>
-                <div>${l.note || l.action_type}</div>
+                <div>${esc(l.note) || l.action_type}</div>
               </div>
               ${state.profile?.role === 'admin' ? `<button type="button" class="btn btn-outline btn-sm" data-action="delete-case-log" data-id="${l.id}" title="刪除這筆歷程紀錄（建議優先用補一筆更正說明）" style="flex-shrink:0; color:var(--err,#C13F3F); border-color:var(--err,#C13F3F);">🗑</button>` : ""}
             </div>`).join("")}
@@ -750,7 +753,7 @@ function renderAccounts(){
       <tbody>
         ${rows.length===0 ? `<tr><td colspan="7" style="text-align:center; color:var(--ink-soft); padding:30px;">目前沒有帳號資料</td></tr>` : rows.map(u=>`
           <tr data-account-row="${u.id}">
-            <td>${u.display_name} ${u.status==='disabled'?'<span class="badge-pending">待審核</span>':''}<div style="font-size:12px; color:var(--ink-soft); word-break:break-all;">${u.email||'（無 Email 資料）'}</div></td>
+            <td>${esc(u.display_name)} ${u.status==='disabled'?'<span class="badge-pending">待審核</span>':''}<div style="font-size:12px; color:var(--ink-soft); word-break:break-all;">${u.email||'（無 Email 資料）'}</div></td>
             <td>
               <select data-field="role" data-id="${u.id}">
                 ${Object.keys(ROLE_LABEL).map(r=>`<option value="${r}" ${u.role===r?'selected':''}>${ROLE_LABEL[r]}</option>`).join("")}
@@ -777,8 +780,8 @@ function renderAccounts(){
             </td>
             <td style="white-space:nowrap;">
               <button class="btn btn-primary btn-sm" data-action="save-account" data-id="${u.id}">儲存</button>
-              <button class="btn btn-outline btn-sm" data-action="reset-password" data-id="${u.id}" data-name="${u.display_name}">🔑 重設密碼</button>
-              <button class="btn btn-outline btn-sm" data-action="delete-account-sql" data-id="${u.id}" data-name="${u.display_name}" style="color:var(--err,#C13F3F);">🗑 刪除</button>
+              <button class="btn btn-outline btn-sm" data-action="reset-password" data-id="${u.id}" data-name="${esc(u.display_name)}">🔑 重設密碼</button>
+              <button class="btn btn-outline btn-sm" data-action="delete-account-sql" data-id="${u.id}" data-name="${esc(u.display_name)}" style="color:var(--err,#C13F3F);">🗑 刪除</button>
             </td>
           </tr>`).join("")}
       </tbody>
@@ -1006,7 +1009,7 @@ function renderManuals(){
             <td><a href="${m.file_url}" target="_blank">${m.title}</a></td>
             <td>${[m.brand,m.model].filter(Boolean).join(' / ')||'—'}</td>
             <td>${vendor?vendor.name:'—'}</td>
-            <td style="font-size:12px; color:var(--ink-soft);">${m.notes||''}</td>
+            <td style="font-size:12px; color:var(--ink-soft);">${esc(m.notes)||''}</td>
             <td><button class="btn btn-outline btn-sm" style="color:var(--err,#C13F3F); border-color:var(--err,#C13F3F);" data-action="delete-manual" data-id="${m.id}">🗑 刪除</button></td>
           </tr>`;
         }).join("")}
@@ -1036,7 +1039,7 @@ function renderInfrastructure(){
         </div>
         <button class="btn btn-outline btn-sm" style="color:var(--err,#C13F3F); border-color:var(--err,#C13F3F);" data-action="delete-infra-record" data-id="${r.id}">🗑 刪除整筆</button>
       </div>
-      ${r.description ? `<div style="font-size:13px; margin-bottom:8px;">${r.description}</div>` : ""}
+      ${r.description ? `<div style="font-size:13px; margin-bottom:8px;">${esc(r.description)}</div>` : ""}
       ${r.latitude ? `<a href="https://www.google.com/maps?q=${r.latitude},${r.longitude}" target="_blank" style="font-size:12px; display:block; margin-bottom:8px; color:var(--steel-dark, var(--primary));">📍 在 Google 地圖開啟${r.compass_heading!=null?`（朝向 ${Math.round(r.compass_heading)}°）`:''}</a>` : ""}
       <div class="attach-grid">
         ${r.photo_url ? `
@@ -1190,7 +1193,7 @@ function renderAssetDetail(){
         <div><label class="field-label">保固期限</label><input type="date" id="asset-warranty" value="${a.warranty_until||''}"></div>
       </div>
       <label class="field-label">備註</label>
-      <textarea id="asset-notes">${a.notes||''}</textarea>
+      <textarea id="asset-notes">${esc(a.notes)||''}</textarea>
       ${state.assetFormError ? `<div class="error-msg">${state.assetFormError}</div>` : ""}
       <button class="btn btn-primary" style="margin-top:12px;" data-action="save-asset">${isNew?'新增資產':'儲存變更'}</button>
     </div>
@@ -1350,7 +1353,7 @@ function renderAssignmentRules(){
       <tbody>
         ${rows.length===0 ? `<tr><td colspan="6" style="text-align:center; color:var(--ink-soft); padding:30px;">此門市尚無廠商指派規則</td></tr>` : rows.map(r=>`
           <tr data-rule-row="${r.id}">
-            <td><input type="text" data-field="note" value="${r.note||''}" style="min-width:180px;" placeholder="例如：洗碗機"></td>
+            <td><input type="text" data-field="note" value="${esc(r.note)||''}" style="min-width:180px;" placeholder="例如：洗碗機"></td>
             <td>
               <select data-field="vendor_id" style="min-width:150px;">
                 ${vendorOptions.replace(`value="${r.vendor_id}"`, `value="${r.vendor_id}" selected`)}
@@ -1463,7 +1466,7 @@ function renderMaintenance(){
             <td><input type="number" data-field="cycle_months" value="${r.cycle_months||''}" style="width:70px;"></td>
             <td>${dueBadge(r)}</td>
             <td><input type="number" data-field="last_cost" value="${r.last_cost||''}" style="width:90px;"></td>
-            <td><input type="text" data-field="note" value="${r.note||''}" style="min-width:140px;"></td>
+            <td><input type="text" data-field="note" value="${esc(r.note)||''}" style="min-width:140px;"></td>
             <td style="white-space:nowrap;">
               <button class="btn btn-primary btn-sm" data-action="save-maintenance-row" data-id="${r.id}">儲存</button>
               <button class="btn btn-outline btn-sm" data-action="delete-maintenance-row" data-id="${r.id}">刪除</button>
@@ -2146,7 +2149,7 @@ async function loadDashboard(){
 
   const { count: pendingAccounts } = await sb.from("users_profile").select("id", { count:"exact", head:true }).eq("status","disabled");
 
-  const stats = { today:0, pending:0, pendingInfo:0, inProgress:0, pendingConfirm:0, urgent:0, repeat:0, overdue:0, monthClosed:0, monthCost:0, pendingAccounts: pendingAccounts||0 };
+  const stats = { today:0, pending:0, pendingInfo:0, inProgress:0, pendingConfirm:0, repairDone:0, urgent:0, repeat:0, overdue:0, monthClosed:0, monthCost:0, pendingAccounts: pendingAccounts||0 };
   const inProgressSet = new Set(STATUS_GROUPS[1].options);
   const overdueEligibleSet = new Set(OVERDUE_ELIGIBLE_STATUSES);
   const overdueCutoff = overdueCutoffIso();
@@ -2156,6 +2159,7 @@ async function loadDashboard(){
     if(c.status === "pending_info") stats.pendingInfo++;
     if(inProgressSet.has(c.status)) stats.inProgress++;
     if(c.status === "pending_store_confirm") stats.pendingConfirm++;
+    if(c.status === "repair_done") stats.repairDone++;
     if(c.urgency === "urgent" && !["closed","cancelled"].includes(c.status)) stats.urgent++;
     if(c.repeat_fault && !["closed","cancelled"].includes(c.status)) stats.repeat++;
     if(overdueEligibleSet.has(c.status) && c.updated_at && c.updated_at < overdueCutoff) stats.overdue++;
@@ -2196,7 +2200,7 @@ function printCaseListAdmin(){
           <tr data-urgent="${c.urgency==='urgent'?1:0}">
             <td>#${c.case_no}</td>
             <td>${c.store_name||''}</td>
-            <td>${c.fault_category||c.general_category||''}</td>
+            <td>${esc(c.fault_category)||esc(c.general_category)||''}</td>
             <td>${URGENCY_LABEL[c.urgency]||''}</td>
             <td>${STATUS_LABEL[c.status]||c.status}</td>
             <td>${vendor ? vendor.name : '—'}</td>
@@ -2244,6 +2248,7 @@ function applyQuickFilter(key){
   if(key === "pending") f.status = "new";
   if(key === "pending_info") f.status = "pending_info";
   if(key === "pending_confirm") f.status = "pending_store_confirm";
+  if(key === "repair_done") f.status = "repair_done";
   if(key === "urgent") f.urgency = "urgent";
   if(key === "overdue") f.overdueOnly = true;
   state.caseFilters = f;

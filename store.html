@@ -273,7 +273,7 @@
     載入中…如果這段文字一直沒有消失，代表網頁程式無法執行，請截圖回報。
   </div>
 </div>
-<div class="version-badge">store build 38</div>
+<div class="version-badge">store build 39</div>
 
 <script>
 function esc(t){ return String(t==null?'':t).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;"); }
@@ -887,7 +887,7 @@ function renderCaseDetail(){
         <p style="font-size:13px; color:var(--ink-soft);">請上傳維修後照片，並確認設備是否恢復正常。</p>
         <div class="upload-grid">${[0,1,2].map(i=>`<div class="upload-slot" data-action="upload-after" data-index="${i}">${state.caseUploadMarks[`after-${i}`]?'✅':'＋'}</div>`).join("")}</div>
         <div style="display:flex; gap:10px; margin-top:14px;">
-          <button class="btn btn-primary" data-action="confirm-result" data-value="normal">正常，可以結案</button>
+          <button class="btn btn-primary" data-action="confirm-result" data-value="normal">正常，已恢復使用</button>
         </div>
         <button class="btn btn-ghost" data-action="confirm-result" data-value="abnormal">還是異常，需要再處理</button>
       </div>`;
@@ -1786,21 +1786,21 @@ async function loadCaseTimeline(caseId){
 
 async function confirmCaseResult(result){
   const c = state.currentCase;
-  const newStatus = result === "normal" ? "closed" : "in_repair";
+  const newStatus = result === "normal" ? "repair_done" : "in_repair";
   const { error } = await sb.from("cases").update({
     store_confirm_result: result,
     status: newStatus,
-    closed_at: result === "normal" ? new Date().toISOString() : null,
+    closed_at: null,
     updated_at: new Date().toISOString()
   }).eq("id", c.id);
   if(error){ alert("更新失敗：" + error.message); return; }
   await sb.from("case_logs").insert({
     case_id: c.id, action_type: "status_change",
     from_status: c.status, to_status: newStatus,
-    note: result === "normal" ? "門市確認：設備已恢復正常，案件結案" : "門市確認：狀況仍然異常，退回維修中",
+    note: result === "normal" ? "門市確認：設備已恢復正常，待總務確認結案" : "門市確認：狀況仍然異常，退回維修中",
     created_by: state.profile?.id || null
   });
-  alert(result === "normal" ? "已確認正常，案件結案" : "已標記異常，案件將退回維修中");
+  alert(result === "normal" ? "已回報設備恢復正常，總務確認後會結案" : "已標記異常，案件將退回維修中");
   await openCase(c.id);
 }
 
