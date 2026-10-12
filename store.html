@@ -273,9 +273,11 @@
     載入中…如果這段文字一直沒有消失，代表網頁程式無法執行，請截圖回報。
   </div>
 </div>
-<div class="version-badge">store build 35</div>
+<div class="version-badge">store build 38</div>
 
 <script>
+function esc(t){ return String(t==null?'':t).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;"); }
+
 /* ============================================================
    Supabase 設定 — 請把下面兩個值換成你自己的 Supabase 專案設定
    （Supabase 後台 → Settings → API）
@@ -329,12 +331,17 @@ async function compressImage(file){
   }
 }
 let initError = "";
+// 從「重設密碼信」點連結回來時，網址會帶 type=recovery
+const IS_RECOVERY_LINK = /type=recovery/.test(location.hash || "");
 try{
   if(!window.supabase){
     throw new Error("Supabase JS 函式庫未載入成功（window.supabase 不存在），可能是 CDN 連線被擋，或網路異常。");
   }
   if(SUPABASE_URL.startsWith("http")){
     sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+    sb.auth.onAuthStateChange((event)=>{
+      if(event === "PASSWORD_RECOVERY"){ state.recovering = true; state.view = "reset"; try{ render(); }catch(e){} }
+    });
   }
 }catch(e){
   initError = e.message || String(e);
@@ -394,6 +401,8 @@ function render(){
   }
   if(state.view === "login") app.innerHTML = renderLogin();
   else if(state.view === "signup") app.innerHTML = renderSignup();
+  else if(state.view === "forgot") app.innerHTML = renderForgot();
+  else if(state.view === "reset") app.innerHTML = renderReset();
   else if(state.view === "profile-missing") app.innerHTML = renderProfileMissing();
   else if(state.view === "home") app.innerHTML = renderHome();
   else if(state.view === "new-report") app.innerHTML = renderNewReport();
@@ -442,8 +451,76 @@ function renderLogin(){
     <div style="margin-top:20px;">
       <button class="btn btn-primary" data-action="do-login">登入</button>
     </div>
-    <div class="login-switch">還沒有帳號？<a data-action="go-signup">申請帳號</a></div>
+    ${state.loginInfo ? `<div style="margin-top:12px; font-size:13px; color:var(--primary); text-align:center;">${esc(state.loginInfo)}</div>` : ""}
+    <div class="login-switch"><a data-action="go-forgot">忘記密碼？</a></div>
+    <div class="login-switch" style="margin-top:8px;">還沒有帳號？<a data-action="go-signup">申請帳號</a></div>
   </div>`;
+}
+
+/* ---------------- 忘記密碼／重設密碼 ---------------- */
+function renderForgot(){
+  return `
+  <div class="login-wrap">
+    <div class="login-mark">🔑</div>
+    <h1 class="login-title">忘記密碼</h1>
+    <p class="login-tag">請輸入申請帳號時的 Email</p>
+    <label class="field-label">Email</label>
+    <input type="email" id="forgot-email" placeholder="you@example.com">
+    ${state.forgotMsg ? `<div class="${state.forgotOk ? '' : 'error-msg'}" style="margin-top:12px; font-size:13px; ${state.forgotOk ? 'color:var(--primary);' : ''}">${esc(state.forgotMsg)}</div>` : ""}
+    <div style="margin-top:20px;">
+      <button class="btn btn-primary" data-action="do-forgot">寄送重設密碼信</button>
+    </div>
+    <div class="login-switch"><a data-action="go-login">‹ 返回登入</a></div>
+    <p style="font-size:12px; color:var(--ink-soft); text-align:center; margin-top:14px; line-height:1.6;">若收不到信，請查看垃圾信件匣；或聯絡總務協助重設。</p>
+  </div>`;
+}
+
+function renderReset(){
+  return `
+  <div class="login-wrap">
+    <div class="login-mark">🔑</div>
+    <h1 class="login-title">設定新密碼</h1>
+    <p class="login-tag">請輸入新的密碼（至少 6 碼）</p>
+    <label class="field-label">新密碼</label>
+    <input type="password" id="reset-password" placeholder="新密碼">
+    <label class="field-label">再輸入一次</label>
+    <input type="password" id="reset-password2" placeholder="再輸入一次新密碼">
+    ${state.resetError ? `<div class="error-msg">${esc(state.resetError)}</div>` : ""}
+    <div style="margin-top:20px;">
+      <button class="btn btn-primary" data-action="do-reset">儲存新密碼</button>
+    </div>
+  </div>`;
+}
+
+async function doForgot(){
+  const email = document.getElementById("forgot-email")?.value.trim();
+  if(!email){ state.forgotOk = false; state.forgotMsg = "請輸入 Email"; render(); return; }
+  const redirectTo = location.origin + location.pathname;
+  const { error } = await sb.auth.resetPasswordForEmail(email, { redirectTo });
+  if(error){
+    state.forgotOk = false;
+    state.forgotMsg = /rate limit/i.test(error.message) ? "寄信次數太頻繁，請稍後再試，或聯絡總務協助重設。" : "寄送失敗：" + error.message;
+  }else{
+    state.forgotOk = true;
+    state.forgotMsg = "如果這個 Email 已申請過帳號，重設密碼信會在幾分鐘內寄出，請查收（也請看垃圾信件匣）。";
+  }
+  render();
+}
+
+async function doReset(){
+  const pw = document.getElementById("reset-password")?.value || "";
+  const pw2 = document.getElementById("reset-password2")?.value || "";
+  if(pw.length < 6){ state.resetError = "密碼至少需要 6 碼"; render(); return; }
+  if(pw !== pw2){ state.resetError = "兩次輸入的密碼不一致"; render(); return; }
+  const { error } = await sb.auth.updateUser({ password: pw });
+  if(error){ state.resetError = "儲存失敗：" + error.message; render(); return; }
+  state.resetError = "";
+  state.recovering = false;
+  try{ history.replaceState(null, "", location.pathname); }catch(e){}
+  await sb.auth.signOut();
+  state.loginInfo = "密碼已更新，請用新密碼登入。";
+  state.view = "login";
+  render();
 }
 
 /* ---------------- 申請帳號 ---------------- */
@@ -507,7 +584,7 @@ function renderManualsSearch(){
         <a href="${m.file_url}" target="_blank" class="card" style="padding:14px; display:block; text-decoration:none; color:inherit; margin-bottom:10px;">
           <strong style="font-size:14px;">${m.title}</strong>
           <div style="font-size:12px; color:var(--ink-soft); margin-top:4px;">${[m.brand,m.model].filter(Boolean).join(' / ')||''}</div>
-          ${m.notes ? `<div style="font-size:13px; margin-top:6px;">${m.notes}</div>` : ""}
+          ${m.notes ? `<div style="font-size:13px; margin-top:6px;">${esc(m.notes)}</div>` : ""}
           <div style="font-size:12px; color:var(--steel-dark, var(--primary)); margin-top:8px;">📄 點此開啟／下載</div>
         </a>`).join("")}
     </div>
@@ -625,7 +702,7 @@ function renderMe(){
   </div>
   <main>
     <div class="card" style="margin-top:-22px; position:relative;">
-      <div class="info-row"><span class="k">姓名　</span>${prof.display_name || "—"}</div>
+      <div class="info-row"><span class="k">姓名　</span>${esc(prof.display_name) || "—"}</div>
       <div class="info-row"><span class="k">角色　</span>${ROLE_LABEL[prof.role] || prof.role || "—"}</div>
       <div class="info-row"><span class="k">門市　</span>${state.storeName || "—"}</div>
     </div>
@@ -775,7 +852,7 @@ function ticketHtml(c){
   return `
   <div class="case-card ${closed?'is-closed':''}" data-action="open-case" data-id="${c.id}">
     <div class="row1">
-      <div class="ttl">${c.fault_category || c.general_category || '報修案件'}</div>
+      <div class="ttl">${esc(c.fault_category) || esc(c.general_category) || '報修案件'}</div>
       <span class="upill ${urg[0]}">${urg[1]}</span>
     </div>
     <div class="meta">案號 ${c.case_no} · ${mdShort(c.report_date || c.created_at)} 建立${where ? ' · ' + where : ''}</div>
@@ -800,7 +877,7 @@ function renderCaseDetail(){
     actionArea = `
       <div class="action-card" style="background:#FBEDE5; border-color:#F0D3C3;">
         <strong>📎 需要補充資料</strong>
-        <p style="font-size:13px; color:var(--ink-soft);">${infoNote ? `總務說明：${infoNote.note}` : "總務標記此案件需要補件，請上傳所需的照片或說明。"}</p>
+        <p style="font-size:13px; color:var(--ink-soft);">${infoNote ? `總務說明：${esc(infoNote.note)}` : "總務標記此案件需要補件，請上傳所需的照片或說明。"}</p>
         <div class="upload-grid">${[0,1,2].map(i=>`<div class="upload-slot" data-action="upload-supplement" data-index="${i}">${state.caseUploadMarks[`supplement-${i}`]?'✅':'＋'}</div>`).join("")}</div>
       </div>`;
   } else if(c.status === "pending_store_confirm"){
@@ -848,7 +925,7 @@ function renderCaseDetail(){
   <header class="topbar">
     <span class="back" data-action="go-home">‹</span>
     <div style="flex:1; min-width:0;">
-      <h1 style="font-size:18px;">${c.fault_category||c.general_category||'報修案件'}</h1>
+      <h1 style="font-size:18px;">${esc(c.fault_category)||esc(c.general_category)||'報修案件'}</h1>
       <div style="font-size:12px; color:var(--ink-soft); margin-top:2px;">案號 ${c.case_no}</div>
     </div>
   </header>
@@ -861,10 +938,10 @@ function renderCaseDetail(){
       <div style="border-top:1px solid var(--border); margin:14px 0 8px;"></div>
       ${c.store_name ? `<div class="info-row"><span class="k">門市：</span>${c.store_name}</div>` : ""}
       ${c.asset_name ? `<div class="info-row"><span class="k">設備：</span>${c.asset_name}</div>` : ""}
-      ${c.fault_reason ? `<div class="info-row"><span class="k">報修原因：</span>${c.fault_reason}</div>` : ""}
-      ${c.suspected_cause ? `<div class="info-row"><span class="k">推測原因：</span>${c.suspected_cause}</div>` : ""}
-      ${c.fault_description ? `<div class="info-row"><span class="k">目前狀況：</span>${c.fault_description}</div>` : ""}
-      <div class="info-row"><span class="k">回報人：</span>${c.reporter_name || '—'}${c.report_date ? ` · ${c.report_date}` : ''}</div>
+      ${c.fault_reason ? `<div class="info-row"><span class="k">報修原因：</span>${esc(c.fault_reason)}</div>` : ""}
+      ${c.suspected_cause ? `<div class="info-row"><span class="k">推測原因：</span>${esc(c.suspected_cause)}</div>` : ""}
+      ${c.fault_description ? `<div class="info-row"><span class="k">目前狀況：</span>${esc(c.fault_description)}</div>` : ""}
+      <div class="info-row"><span class="k">回報人：</span>${esc(c.reporter_name) || '—'}${c.report_date ? ` · ${c.report_date}` : ''}</div>
     </div>
     ${(state.caseDetailPhotos && state.caseDetailPhotos.length) ? `
     <div class="card">
@@ -886,7 +963,7 @@ function renderCaseDetail(){
           [...state.caseLogsRaw].reverse().map((l,i)=>{
             const t = new Date(l.created_at);
             const hhmm = `${String(t.getHours()).padStart(2,'0')}:${String(t.getMinutes()).padStart(2,'0')}`;
-            return `<div class="tl-item ${i===0?'':'old'}"><div class="tl-dot"></div><div><div class="tl-txt">${l.note||l.action_type}</div><div class="tl-time">${t.getMonth()+1}/${t.getDate()} ${hhmm}</div></div></div>`;
+            return `<div class="tl-item ${i===0?'':'old'}"><div class="tl-dot"></div><div><div class="tl-txt">${esc(l.note)||l.action_type}</div><div class="tl-time">${t.getMonth()+1}/${t.getDate()} ${hhmm}</div></div></div>`;
           }).join("")}
       </div>
     </div>
@@ -1085,7 +1162,7 @@ function renderSetupNewInfra(){
       ${Object.keys(typeLabel).map(k=>`<option value="${k}" ${s.newInfra.itemType===k?'selected':''}>${typeLabel[k]}</option>`).join("")}
     </select>
     <label class="field-label">說明文字</label>
-    <textarea id="su-infra-desc" placeholder="例如：總開關位於吧台後方牆面，黑色鐵箱">${s.newInfra.description}</textarea>
+    <textarea id="su-infra-desc" placeholder="例如：總開關位於吧台後方牆面，黑色鐵箱">${esc(s.newInfra.description)}</textarea>
     <label class="field-label">對應設備/區域（選填）</label>
     <input type="text" id="su-infra-area" value="${s.newInfra.relatedArea}" placeholder="例如：廚房插座">
     ${isLocationType ? `
@@ -1342,7 +1419,10 @@ async function onAction(e){
   }
   else if(action === "go-me"){ state.view="me"; render(); window.scrollTo(0,0); }
   else if(action === "set-tab"){ state.myCasesTab = el.dataset.tab; render(); }
-  else if(action === "go-login"){ state.loginError=""; state.view="login"; render(); }
+  else if(action === "go-login"){ state.loginError=""; state.loginInfo=""; state.view="login"; render(); }
+  else if(action === "go-forgot"){ state.forgotMsg=""; state.forgotOk=false; state.view="forgot"; render(); }
+  else if(action === "do-forgot"){ await doForgot(); }
+  else if(action === "do-reset"){ await doReset(); }
   else if(action === "go-signup"){ state.signupError=""; await loadStoresForSignup(); state.view="signup"; render(); }
   else if(action === "do-login"){ await doLogin(); }
   else if(action === "do-signup"){ await doSignup(); }
@@ -1546,7 +1626,23 @@ function onAssetSearch(e){
   }, 300);
 }
 
+let _submittingReport = false;
 async function submitReport(){
+  // 防止連點：送出期間鎖住，避免同一份報修被建立兩次
+  if(_submittingReport) return;
+  _submittingReport = true;
+  const btn = document.querySelector('[data-action="report-submit"]');
+  const oldTxt = btn ? btn.textContent : "";
+  if(btn){ btn.disabled = true; btn.textContent = "送出中…"; }
+  try{ await _submitReportInner(); }
+  finally{
+    _submittingReport = false;
+    const b2 = document.querySelector('[data-action="report-submit"]');
+    if(b2){ b2.disabled = false; if(oldTxt) b2.textContent = oldTxt; }
+  }
+}
+
+async function _submitReportInner(){
   const s = state.newReport;
   const effectiveStoreId = state.storeId || s.selectedStoreId;
 
@@ -1630,7 +1726,7 @@ function printCaseList(){
           <tr data-urgent="${c.urgency==='urgent'?1:0}">
             <td>#${c.case_no}</td>
             <td>${c.store_name||''}</td>
-            <td>${c.fault_category||c.general_category||''}</td>
+            <td>${esc(c.fault_category)||esc(c.general_category)||''}</td>
             <td>${URGENCY_LABEL[c.urgency]||''}</td>
             <td>${STATUS_LABEL[c.status]||c.status}</td>
             <td>${new Date(c.created_at).toLocaleDateString('zh-TW')}</td>
@@ -2228,6 +2324,7 @@ async function init(){
       timeout(8000)
     ]);
 
+    if(IS_RECOVERY_LINK || state.recovering){ state.recovering = true; state.view = "reset"; render(); return; }
     if(session){ await loadProfileAndEnter(); }
     else { state.view = "login"; render(); }
   }catch(err){
