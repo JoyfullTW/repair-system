@@ -273,7 +273,7 @@
     載入中…如果這段文字一直沒有消失，代表網頁程式無法執行，請截圖回報。
   </div>
 </div>
-<div class="version-badge">store build 41</div>
+<div class="version-badge">store build 42</div>
 
 <script>
 function esc(t){ return String(t==null?'':t).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;"); }
@@ -2255,7 +2255,7 @@ async function doSignup(){
     render(); return;
   }
 
-  const { data: signUpData, error: signUpError } = await sb.auth.signUp({ email, password });
+  const { data: signUpData, error: signUpError } = await sb.auth.signUp({ email, password, options: { emailRedirectTo: location.origin + location.pathname } });
   if(signUpError){ state.signupError = "申請失敗：" + signUpError.message; render(); return; }
 
   const userId = signUpData.user?.id;
