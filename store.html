@@ -273,7 +273,7 @@
     載入中…如果這段文字一直沒有消失，代表網頁程式無法執行，請截圖回報。
   </div>
 </div>
-<div class="version-badge">store build 44</div>
+<div class="version-badge">store build 45</div>
 
 <script>
 function esc(t){ return String(t==null?'':t).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;"); }
@@ -683,6 +683,7 @@ function renderHome(){
       <div class="stat"><div class="n soft">${monthClosed}</div><div class="l">本月已結案</div></div>
     </div>
     ${needConfirm ? `<div class="banner" style="background:#FBE3D6; color:#B45A38;">有 ${needConfirm} 件維修已完成，等你確認結果</div>` : ""}
+    ${renderLineNudgeBanner()}
     <button class="btn btn-accent" data-action="go-new-report" style="font-size:16px; padding:17px;">＋ 新增報修</button>
     ${isManagement ? `
     <div class="filter-box" style="margin-top:14px;">
@@ -844,6 +845,7 @@ function renderSuccess(){
       <h2>報修已送出</h2>
       <p class="no">案件編號　${state.currentCase?.case_no || ''}</p>
     </div>
+    ${renderLineNudgeSuccess(state.currentCase)}
   </main>
   <div class="footer-actions"><div class="inner">
     <button class="btn btn-primary" data-action="go-home">回到首頁</button>
@@ -892,6 +894,7 @@ function renderCaseDetail(){
         <strong>📎 需要補充資料</strong>
         <p style="font-size:13px; color:var(--ink-soft);">${infoNote ? `總務說明：${esc(infoNote.note)}` : "總務標記此案件需要補件，請上傳所需的照片或說明。"}</p>
         <div class="upload-grid">${[0,1,2].map(i=>`<div class="upload-slot" data-action="upload-supplement" data-index="${i}">${state.caseUploadMarks[`supplement-${i}`]?'✅':'＋'}</div>`).join("")}</div>
+        ${renderLineNudgeCase(c)}
       </div>`;
   } else if(c.status === "pending_store_confirm"){
     actionArea = `
@@ -1441,6 +1444,8 @@ async function onAction(e){
   else if(action === "do-signup"){ await doSignup(); }
   else if(action === "do-logout"){ await doLogout(); }
   else if(action === "line-bind"){ startLineLogin(); }
+  else if(action === "line-bind-quick"){ startLineLogin(el.dataset.name || ""); }
+  else if(action === "line-nudge-snooze"){ try{ localStorage.setItem("line_nudge_snooze", String(Date.now())); }catch(e){} render(); }
   else if(action === "line-unbind"){ await unbindLine(el.dataset.id); }
   else if(action === "go-new-report"){
     resetNewReport();
@@ -2329,6 +2334,54 @@ async function loadProfileAndEnter(){
 /* ============================================================
    綁定 LINE（讓總務能在 LINE 官方帳號直接聯絡你）
    ============================================================ */
+/* ---- 引導綁定 LINE：判斷與提醒卡 ---- */
+function lineNudgeRole(){ return ["store","district_manager"].includes(state.profile?.role); }
+function lineNudgeSnoozed(){
+  try{ const t = Number(localStorage.getItem("line_nudge_snooze") || 0); return t && (Date.now() - t) < 3*24*3600*1000; }catch(e){ return false; }
+}
+function lineBindingForName(name){
+  const n = String(name||"").trim();
+  if(!n) return null;
+  return (state.lineBindings||[]).find(b => String(b.person_name||"").trim() === n) || null;
+}
+// 報修成功畫面：這位報修人還沒綁定 LINE 時顯示
+function renderLineNudgeSuccess(c){
+  if(!lineNudgeRole() || lineNudgeSnoozed()) return "";
+  const name = (c?.reporter_name || "").trim();
+  const b = lineBindingForName(name);
+  if(b && b.friend_flag !== false) return "";
+  const warn = b && b.friend_flag === false;
+  return `
+    <div class="card" style="margin:18px 16px 0; text-align:left; border:1.5px solid #E7C9B6; background:#FFF7F1;">
+      <strong>💬 ${warn ? "請加入官方帳號好友" : "綁定 LINE，方便總務確認現場狀況"}</strong>
+      <p style="font-size:13px; color:var(--ink-soft); margin:6px 0 10px; line-height:1.6;">${warn
+        ? "你已綁定 LINE，但還沒加入「珍有福總務_通報」好友，總務無法聯絡你。"
+        : "需要補照片或詢問時，總務能直接在 LINE 找到你，綁定只要約 10 秒。"}</p>
+      <button class="btn btn-primary" data-action="line-bind-quick" data-name="${esc(name)}">${warn ? "前往加入好友" : `立即綁定${name ? "（" + esc(name) + "）" : ""}`}</button>
+      <button class="btn btn-ghost" data-action="line-nudge-snooze" style="margin-top:8px;">稍後再說</button>
+    </div>`;
+}
+// 首頁橫幅：這個帳號完全沒有任何人綁定時顯示
+function renderLineNudgeBanner(){
+  if(!lineNudgeRole() || lineNudgeSnoozed() || (state.lineBindings||[]).length) return "";
+  return `<div class="banner" style="background:#FFF1E6; color:#8A4A2B; display:flex; align-items:center; gap:10px;">
+    <span data-action="go-me" style="flex:1; cursor:pointer;">💬 綁定 LINE，總務有問題能直接找到你 ›</span>
+    <span data-action="line-nudge-snooze" style="cursor:pointer; padding:2px 8px; opacity:.7;">✕</span>
+  </div>`;
+}
+// 案件頁「資料待補」：提醒綁定
+function renderLineNudgeCase(c){
+  if(!lineNudgeRole()) return "";
+  const b = lineBindingForName(c?.reporter_name);
+  if(b && b.friend_flag !== false) return "";
+  const name = (c?.reporter_name || "").trim();
+  return `<div style="margin-top:12px; padding-top:12px; border-top:1px dashed #E7C9B6;">
+    <div style="font-size:13px; font-weight:700;">💬 綁定 LINE，補件更快</div>
+    <div style="font-size:12px; color:var(--ink-soft); margin:4px 0 8px; line-height:1.6;">綁定後，總務有疑問可直接在 LINE 找到你，不必等電話。</div>
+    <button class="btn btn-outline" data-action="line-bind-quick" data-name="${esc(name)}">${b ? "前往加入官方帳號好友" : "綁定我的 LINE"}</button>
+  </div>`;
+}
+
 function renderLineCard(){
   const list = state.lineBindings || [];
   const rows = list.map(b=>`
@@ -2359,9 +2412,9 @@ async function loadMyLineBindings(){
   state.lineBindings = error ? [] : (data || []);
 }
 
-function startLineLogin(){
-  const name = (document.getElementById("line-person-name")?.value || "").trim();
-  if(!name){ state.lineMsg = "請先輸入你的名字，再按綁定。"; state.lineMsgOk = false; render(); return; }
+function startLineLogin(nameOverride){
+  const name = ((typeof nameOverride === "string" && nameOverride.trim()) || document.getElementById("line-person-name")?.value || "").trim();
+  if(!name){ if(state.view !== "me") state.view = "me"; state.lineMsg = "請先輸入你的名字，再按綁定。"; state.lineMsgOk = false; render(); return; }
   const arr = new Uint8Array(16); crypto.getRandomValues(arr);
   const st = Array.from(arr).map(b=>b.toString(16).padStart(2,"0")).join("");
   try{
