@@ -273,7 +273,7 @@
     載入中…如果這段文字一直沒有消失，代表網頁程式無法執行，請截圖回報。
   </div>
 </div>
-<div class="version-badge">store build 43</div>
+<div class="version-badge">store build 44</div>
 
 <script>
 function esc(t){ return String(t==null?'':t).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;"); }
@@ -334,6 +334,7 @@ let initError = "";
 // 從「重設密碼信」點連結回來時，網址會帶 type=recovery
 const IS_RECOVERY_LINK = /type=recovery/.test(location.hash || "");
 const LINE_LOGIN_CHANNEL_ID = "2012012663";
+const LINE_OA_ID = "@341xpnau"; // 官方帳號「珍有福總務_通報」的 LINE ID
 const LINE_LOGIN_REDIRECT = "https://joyfulltw.github.io/repair-system/store.html"; // 必須與 LINE Developers 後台的 Callback URL 完全一致
 const LINE_CB = (function(){
   try{
@@ -2335,6 +2336,7 @@ function renderLineCard(){
       <div style="font-size:14px;">
         <b>${esc(b.person_name || "（未填姓名）")}</b>　<span style="color:var(--ink-soft);">LINE：${esc(b.line_display_name || "—")}</span>
         <div style="font-size:12px; margin-top:2px; color:${b.friend_flag===false ? "#B45A38" : "var(--ink-soft)"};">${b.friend_flag===false ? "⚠️ 尚未加入官方帳號好友，總務無法聯絡你" : (b.friend_flag===true ? "✅ 已加入官方帳號" : "")}</div>
+        <div style="font-size:12px; margin-top:4px;"><a href="https://line.me/R/oaMessage/${encodeURIComponent(LINE_OA_ID)}/?${encodeURIComponent("已綁定：" + (b.person_name || ""))}" style="color:var(--primary); font-weight:700;">👉 傳一則訊息給總務（這樣總務才能在 LINE 找到你）</a></div>
       </div>
       <button class="btn btn-ghost btn-sm" data-action="line-unbind" data-id="${b.id}" style="width:auto; padding:6px 10px;">解除</button>
     </div>`).join("");
@@ -2347,7 +2349,7 @@ function renderLineCard(){
       <label class="field-label" style="margin-top:10px;">你的名字（讓總務知道是誰）</label>
       <input type="text" id="line-person-name" placeholder="例如：王小美" maxlength="30">
       <button class="btn btn-primary" data-action="line-bind" style="margin-top:10px;" ${state.lineBusy ? "disabled" : ""}>${state.lineBusy ? "處理中…" : "綁定我的 LINE"}</button>
-      <p style="font-size:12px; color:var(--ink-soft); margin:8px 0 0; line-height:1.6;">按下後會跳到 LINE 授權畫面，並詢問是否加入官方帳號為好友，請選「加入」。同一個帳號有多人使用時，每個人都可以各自綁定自己的 LINE。</p>
+      <p style="font-size:12px; color:var(--ink-soft); margin:8px 0 0; line-height:1.6;">按下後會跳到 LINE 授權畫面，並詢問是否加入官方帳號為好友，請選「加入」。綁定完成後，請再按上面的「傳一則訊息給總務」，傳出一則訊息，總務才能在 LINE 聊天室找到你。同一個帳號有多人使用時，每個人都可以各自綁定自己的 LINE。</p>
     </div>`;
 }
 
@@ -2400,7 +2402,7 @@ async function finishLineBind(){
     else if(data?.friend_flag === false){
       state.lineMsg = "已綁定，但你還沒有加入官方帳號好友。請到 LINE 搜尋並加入「珍有福總務_通報」，總務才能聯絡到你。"; state.lineMsgOk = false;
     }else{
-      state.lineMsg = "✅ 綁定完成！"; state.lineMsgOk = true;
+      state.lineMsg = "✅ 綁定完成！最後一步：請按下方「傳一則訊息給總務」，傳出訊息後，總務才能在 LINE 找到你。"; state.lineMsgOk = true;
     }
   }catch(e){ msg = String(e.message || e); }
   state.lineBusy = false;
