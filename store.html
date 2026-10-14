@@ -273,7 +273,7 @@
     載入中…如果這段文字一直沒有消失，代表網頁程式無法執行，請截圖回報。
   </div>
 </div>
-<div class="version-badge">store build 42</div>
+<div class="version-badge">store build 43</div>
 
 <script>
 function esc(t){ return String(t==null?'':t).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;"); }
@@ -333,6 +333,16 @@ async function compressImage(file){
 let initError = "";
 // 從「重設密碼信」點連結回來時，網址會帶 type=recovery
 const IS_RECOVERY_LINK = /type=recovery/.test(location.hash || "");
+const LINE_LOGIN_CHANNEL_ID = "2012012663";
+const LINE_LOGIN_REDIRECT = "https://joyfulltw.github.io/repair-system/store.html"; // 必須與 LINE Developers 後台的 Callback URL 完全一致
+const LINE_CB = (function(){
+  try{
+    const q = new URLSearchParams(location.search);
+    if(q.get("code") && q.get("state")) return { code:q.get("code"), state:q.get("state") };
+    if(q.get("state") && q.get("error")) return { error:q.get("error_description") || q.get("error"), state:q.get("state") };
+  }catch(e){}
+  return null;
+})();
 try{
   if(!window.supabase){
     throw new Error("Supabase JS 函式庫未載入成功（window.supabase 不存在），可能是 CDN 連線被擋，或網路異常。");
@@ -361,6 +371,7 @@ const STATUS_LABEL = {
 const ACTIVE_STATUSES = ["pending_info","pending_store_confirm"]; // 需要門市動作的狀態
 
 let state = {
+  lineBindings: [], lineMsg: "", lineMsgOk: false, lineBusy: false,
   view: "login",          // login | signup | home | new-report | my-cases | case-detail
   session: null,
   profile: null,
@@ -706,6 +717,7 @@ function renderMe(){
       <div class="info-row"><span class="k">角色　</span>${ROLE_LABEL[prof.role] || prof.role || "—"}</div>
       <div class="info-row"><span class="k">門市　</span>${state.storeName || "—"}</div>
     </div>
+    ${renderLineCard()}
     ${canSetup ? `<button class="btn btn-outline" data-action="go-setup-menu" style="margin-bottom:12px;">🏗️ 新門市建檔</button>` : ""}
     <button class="btn btn-outline" data-action="do-logout">登出</button>
   </main>
@@ -1427,6 +1439,8 @@ async function onAction(e){
   else if(action === "do-login"){ await doLogin(); }
   else if(action === "do-signup"){ await doSignup(); }
   else if(action === "do-logout"){ await doLogout(); }
+  else if(action === "line-bind"){ startLineLogin(); }
+  else if(action === "line-unbind"){ await unbindLine(el.dataset.id); }
   else if(action === "go-new-report"){
     resetNewReport();
     if(!state.storeId) await loadStoresForSignup();
@@ -2304,9 +2318,102 @@ async function loadProfileAndEnter(){
     state.storeName = `${profile.regions?.name || "轄區"}總覽`;
   }
 
+  try{ await loadMyLineBindings(); }catch(e){}
   if(!state.storeId && !state.setup.allStores.length){ try{ await loadAllStoresForSetup(); }catch(e){} }
   await loadMyCases();
   state.view = "home";
+  render();
+}
+
+/* ============================================================
+   綁定 LINE（讓總務能在 LINE 官方帳號直接聯絡你）
+   ============================================================ */
+function renderLineCard(){
+  const list = state.lineBindings || [];
+  const rows = list.map(b=>`
+    <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; padding:8px 0; border-bottom:1px dashed var(--line,#ddd);">
+      <div style="font-size:14px;">
+        <b>${esc(b.person_name || "（未填姓名）")}</b>　<span style="color:var(--ink-soft);">LINE：${esc(b.line_display_name || "—")}</span>
+        <div style="font-size:12px; margin-top:2px; color:${b.friend_flag===false ? "#B45A38" : "var(--ink-soft)"};">${b.friend_flag===false ? "⚠️ 尚未加入官方帳號好友，總務無法聯絡你" : (b.friend_flag===true ? "✅ 已加入官方帳號" : "")}</div>
+      </div>
+      <button class="btn btn-ghost btn-sm" data-action="line-unbind" data-id="${b.id}" style="width:auto; padding:6px 10px;">解除</button>
+    </div>`).join("");
+  return `
+    <div class="card" style="margin-bottom:12px;">
+      <strong>💬 綁定 LINE</strong>
+      <p style="font-size:13px; color:var(--ink-soft); margin:6px 0 10px; line-height:1.6;">綁定後，總務有問題要問你（例如照片不清楚、需要確認現場狀況）時，可以直接在 LINE 找到你，不用再打電話。</p>
+      ${state.lineMsg ? `<div style="font-size:13px; margin:0 0 10px; color:${state.lineMsgOk ? "var(--primary)" : "#B45A38"};">${esc(state.lineMsg)}</div>` : ""}
+      ${rows || `<p style="font-size:13px; color:var(--ink-soft); margin:0 0 10px;">目前沒有綁定任何 LINE。</p>`}
+      <label class="field-label" style="margin-top:10px;">你的名字（讓總務知道是誰）</label>
+      <input type="text" id="line-person-name" placeholder="例如：王小美" maxlength="30">
+      <button class="btn btn-primary" data-action="line-bind" style="margin-top:10px;" ${state.lineBusy ? "disabled" : ""}>${state.lineBusy ? "處理中…" : "綁定我的 LINE"}</button>
+      <p style="font-size:12px; color:var(--ink-soft); margin:8px 0 0; line-height:1.6;">按下後會跳到 LINE 授權畫面，並詢問是否加入官方帳號為好友，請選「加入」。同一個帳號有多人使用時，每個人都可以各自綁定自己的 LINE。</p>
+    </div>`;
+}
+
+async function loadMyLineBindings(){
+  if(!state.session?.user?.id) { state.lineBindings = []; return; }
+  const { data, error } = await sb.from("user_line_bindings").select("*").eq("profile_id", state.session.user.id).order("bound_at", { ascending:true });
+  state.lineBindings = error ? [] : (data || []);
+}
+
+function startLineLogin(){
+  const name = (document.getElementById("line-person-name")?.value || "").trim();
+  if(!name){ state.lineMsg = "請先輸入你的名字，再按綁定。"; state.lineMsgOk = false; render(); return; }
+  const arr = new Uint8Array(16); crypto.getRandomValues(arr);
+  const st = Array.from(arr).map(b=>b.toString(16).padStart(2,"0")).join("");
+  try{
+    localStorage.setItem("line_bind_state", JSON.stringify({ state: st, name, t: Date.now() }));
+  }catch(e){
+    state.lineMsg = "這個瀏覽器無法暫存資料（可能開了隱私模式），請改用一般模式再試。"; state.lineMsgOk = false; render(); return;
+  }
+  const url = "https://access.line.me/oauth2/v2.1/authorize?" + new URLSearchParams({
+    response_type: "code",
+    client_id: LINE_LOGIN_CHANNEL_ID,
+    redirect_uri: LINE_LOGIN_REDIRECT,
+    state: st,
+    scope: "profile openid",
+    bot_prompt: "aggressive"
+  }).toString();
+  location.href = url;
+}
+
+async function finishLineBind(){
+  // 從 LINE 授權回來：檢查 state、把授權碼交給後端換成使用者資料
+  let saved = null;
+  try{ saved = JSON.parse(localStorage.getItem("line_bind_state") || "null"); localStorage.removeItem("line_bind_state"); }catch(e){}
+  try{ history.replaceState(null, "", location.pathname); }catch(e){}
+  state.view = "me";
+  if(LINE_CB.error){ state.lineMsg = "LINE 授權沒有完成：" + LINE_CB.error; state.lineMsgOk = false; render(); return; }
+  if(!saved || saved.state !== LINE_CB.state || (Date.now() - saved.t) > 15*60*1000){
+    state.lineMsg = "綁定逾時或驗證不符，請重新按一次「綁定我的 LINE」。"; state.lineMsgOk = false; render(); return;
+  }
+  state.lineBusy = true; render();
+  let msg = "";
+  try{
+    const { data, error } = await sb.functions.invoke("line-login-bind", {
+      body: { code: LINE_CB.code, redirect_uri: LINE_LOGIN_REDIRECT, person_name: saved.name }
+    });
+    if(error){
+      try{ const j = await error.context.json(); msg = j.error || error.message; }catch(e){ msg = error.message; }
+    }else if(data?.error){ msg = data.error; }
+    else if(data?.friend_flag === false){
+      state.lineMsg = "已綁定，但你還沒有加入官方帳號好友。請到 LINE 搜尋並加入「珍有福總務_通報」，總務才能聯絡到你。"; state.lineMsgOk = false;
+    }else{
+      state.lineMsg = "✅ 綁定完成！"; state.lineMsgOk = true;
+    }
+  }catch(e){ msg = String(e.message || e); }
+  state.lineBusy = false;
+  if(msg){ state.lineMsg = "綁定失敗：" + msg; state.lineMsgOk = false; }
+  await loadMyLineBindings();
+  render();
+}
+
+async function unbindLine(id){
+  if(!confirm("確定要解除這個 LINE 綁定嗎？解除後總務就找不到這個 LINE。")) return;
+  const { error } = await sb.from("user_line_bindings").delete().eq("id", id);
+  state.lineMsg = error ? ("解除失敗：" + error.message) : "已解除綁定。"; state.lineMsgOk = !error;
+  await loadMyLineBindings();
   render();
 }
 
@@ -2327,8 +2434,14 @@ async function init(){
     ]);
 
     if(IS_RECOVERY_LINK || state.recovering){ state.recovering = true; state.view = "reset"; render(); return; }
-    if(session){ await loadProfileAndEnter(); }
-    else { state.view = "login"; render(); }
+    if(session){
+      await loadProfileAndEnter();
+      if(LINE_CB && state.profile){ await finishLineBind(); }
+    }
+    else {
+      if(LINE_CB){ try{ history.replaceState(null, "", location.pathname); }catch(e){} state.loginInfo = "請先登入，再回到「我的」頁面重新綁定 LINE。"; }
+      state.view = "login"; render();
+    }
   }catch(err){
     app.innerHTML = `
       <main style="padding:40px 24px;">

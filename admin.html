@@ -161,7 +161,7 @@
 </head>
 <body>
 <div id="app"></div>
-<div class="version-badge">admin build 61</div>
+<div class="version-badge">admin build 62</div>
 
 <script>
 function esc(t){ return String(t==null?'':t).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;"); }
@@ -552,6 +552,22 @@ function renderCaseAttachmentsInner(){
     </div>`).join("");
 }
 
+function renderCaseLineBlock(c){
+  const list = state.caseLineBindings;
+  if(list === null || list === undefined) return "";
+  const isImported = !c.created_by;
+  if(isImported) return `<p style="font-size:12px; color:var(--ink-soft); margin:2px 0 6px;">💬 LINE：這筆是總務匯入的案件，沒有對應帳號，請用電話聯絡。</p>`;
+  if(list.length === 0) return `<p style="font-size:12px; color:#B45A38; margin:2px 0 6px;">💬 LINE：這個帳號還沒有人綁定 LINE，請用電話聯絡。</p>`;
+  const rn = (c.reporter_name||"").trim();
+  const matched = rn ? list.filter(b=> (b.person_name||"").trim() === rn) : [];
+  const ordered = [...matched, ...list.filter(b=>!matched.includes(b))];
+  return `<div style="margin:6px 0; padding:8px 10px; background:var(--chip-bg,#F1F3F5); border-radius:8px;">
+    <div style="font-size:12px; font-weight:700; margin-bottom:4px;">💬 可用 LINE 聯絡（到 LINE 官方帳號「珍有福總務_通報」的聊天室搜尋暱稱）</div>
+    ${ordered.map(b=>`<div style="font-size:13px; margin:2px 0;">${matched.includes(b)?"⭐ ":""}<b>${esc(b.person_name||"（未填姓名）")}</b>　LINE 暱稱：<b>${esc(b.line_display_name||"—")}</b> ${b.friend_flag===false?'<span style="color:#B45A38;">（未加官方帳號好友，聯絡不到）</span>':''}</div>`).join("")}
+    ${matched.length ? `<div style="font-size:11px; color:var(--ink-soft); margin-top:4px;">⭐ 綁定姓名和「現場報修人」相同</div>` : (rn ? `<div style="font-size:11px; color:var(--ink-soft); margin-top:4px;">沒有綁定姓名和「現場報修人 ${esc(rn)}」相同，請先確認是哪一位。</div>` : "")}
+  </div>`;
+}
+
 function renderCaseDetail(){
   const c = state.currentCase;
   if(!c) return `<div class="empty">找不到案件</div>`;
@@ -610,6 +626,7 @@ function renderCaseDetail(){
         <p style="font-size:13px; color:var(--ink-soft); margin:4px 0;">推測原因：${esc(c.suspected_cause)||'—'}</p>
         <p style="font-size:13px; color:var(--ink-soft); margin:4px 0;">目前狀況：${esc(c.fault_description)||'—'}</p>
         <p style="font-size:13px; color:var(--ink-soft); margin:4px 0;">現場報修人：${esc(c.reporter_name)||'—'}（${esc(c.reporter_phone)||'—'}）</p>
+        ${renderCaseLineBlock(c)}
         <button class="btn btn-outline btn-sm" style="margin-top:10px;" data-action="copy-case-info">📋 複製案件資訊＋照片連結</button>
         <p style="font-size:11px; color:var(--ink-soft); margin-top:6px;">複製後可直接貼到 LINE 群組給廠商，照片連結不需登入即可開啟。</p>
 
@@ -767,7 +784,7 @@ function renderAccounts(){
       <tbody>
         ${rows.length===0 ? `<tr><td colspan="7" style="text-align:center; color:var(--ink-soft); padding:30px;">目前沒有帳號資料</td></tr>` : rows.map(u=>`
           <tr data-account-row="${u.id}">
-            <td>${esc(u.display_name)} ${u.status==='disabled'?'<span class="badge-pending">待審核</span>':''}<div style="font-size:12px; color:var(--ink-soft); word-break:break-all;">${u.email||'（無 Email 資料）'}</div></td>
+            <td>${esc(u.display_name)} ${u.status==='disabled'?'<span class="badge-pending">待審核</span>':''}<div style="font-size:12px; color:var(--ink-soft); word-break:break-all;">${u.email||'（無 Email 資料）'}</div>${(()=>{ const l=(state.accountLineMap||{})[u.id]||[]; return l.length ? `<div style="font-size:12px; color:var(--ok,#2E7D4F); margin-top:2px;">💬 LINE 已綁定 ${l.length} 人：${l.map(b=>esc(b.person_name||b.line_display_name||'—')).join('、')}</div>` : `<div style="font-size:12px; color:var(--ink-soft); margin-top:2px;">💬 LINE 尚未綁定</div>`; })()}</td>
             <td>
               <select data-field="role" data-id="${u.id}">
                 ${Object.keys(ROLE_LABEL).map(r=>`<option value="${r}" ${u.role===r?'selected':''}>${ROLE_LABEL[r]}</option>`).join("")}
@@ -2385,6 +2402,12 @@ async function loadAccounts(){
   const { data, error } = await sb.from("users_profile").select("*").order("status").order("display_name");
   if(error){ alert("載入失敗：" + error.message); return; }
   state.accounts = data || [];
+  try{
+    const { data: lb } = await sb.from("user_line_bindings").select("profile_id, line_display_name, person_name, friend_flag");
+    const m = {};
+    (lb||[]).forEach(b=>{ (m[b.profile_id] = m[b.profile_id] || []).push(b); });
+    state.accountLineMap = m;
+  }catch(e){ state.accountLineMap = {}; }
 }
 
 /* ============================================================
@@ -2419,6 +2442,7 @@ async function openCase(id){
   if(error){ alert("載入失敗：" + error.message); return; }
   state.currentCase = { ...data, store_name: data.stores?.name || "" };
   state.showArchiveConfirm = false;
+  state.caseLineBindings = null;
   state.view = "case-detail";
   render();
   loadCaseLogs(id);
@@ -2426,6 +2450,7 @@ async function openCase(id){
   loadCaseVendorSuggestions(data);
   state.caseStoreContact = null;
   loadCaseStoreContact(data.store_id);
+  loadCaseLineBindings(data.created_by);
   loadRelatedCases(data);
 }
 
@@ -2763,6 +2788,14 @@ async function restoreCase(){
 const LUOYI_FORM_URL = "https://script.google.com/macros/s/AKfycbx93QdH00d4KxvP5FiJW1n74LrmSHM--2xJFKyezj7EeCpLH3zXmQlQFvu8Y64ajTrm/exec";
 
 function escHtmlLuoyi(t){ return String(t==null?'':t).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
+
+async function loadCaseLineBindings(profileId){
+  state.caseLineBindings = null; // null = 載入中或無帳號；[] = 已查詢但沒有綁定
+  if(!profileId){ state.caseLineBindings = []; if(state.view === "case-detail") render(); return; }
+  const { data } = await sb.from("user_line_bindings").select("*").eq("profile_id", profileId).order("bound_at", { ascending:true });
+  state.caseLineBindings = data || [];
+  if(state.view === "case-detail") render();
+}
 
 async function loadCaseStoreContact(storeId){
   state.caseStoreContact = null;
