@@ -273,7 +273,7 @@
     載入中…如果這段文字一直沒有消失，代表網頁程式無法執行，請截圖回報。
   </div>
 </div>
-<div class="version-badge">store build 45</div>
+<div class="version-badge">store build 46</div>
 
 <script>
 function esc(t){ return String(t==null?'':t).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;"); }
@@ -1424,6 +1424,14 @@ async function uploadAttachment(caseId, file, category){
   if(insErr) throw insErr;
 }
 
+// 防連點：門市回報類按鈕，送出期間不接受第二次點擊，避免同一筆紀錄重複寫入
+let _storeActionBusy = false;
+async function guardOnce(fn){
+  if(_storeActionBusy) return;
+  _storeActionBusy = true;
+  try{ await fn(); } finally{ _storeActionBusy = false; }
+}
+
 async function onAction(e){
   const el = e.currentTarget;
   const action = el.dataset.action;
@@ -1473,8 +1481,8 @@ async function onAction(e){
   else if(action === "report-next"){ advanceReportStep(); }
   else if(action === "report-submit"){ await submitReport(); }
   else if(action === "open-case"){ await openCase(el.dataset.id); }
-  else if(action === "confirm-result"){ await confirmCaseResult(el.dataset.value); }
-  else if(action === "report-vendor-progress"){ await reportVendorProgress(el.dataset.value); }
+  else if(action === "confirm-result"){ await guardOnce(()=>confirmCaseResult(el.dataset.value)); }
+  else if(action === "report-vendor-progress"){ await guardOnce(()=>reportVendorProgress(el.dataset.value)); }
   else if(action === "upload-slot"){
     fileTarget = { mode:"new-report", index: Number(el.dataset.index) };
     fileInput.multiple = false;
