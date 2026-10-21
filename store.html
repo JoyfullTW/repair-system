@@ -261,6 +261,8 @@
   .attach-grid{ display:grid; grid-template-columns:repeat(auto-fill, minmax(100px,1fr)); gap:10px; margin-top:8px; }
   .attach-item{ border:1px solid var(--border); border-radius:8px; overflow:hidden; background:#F7FAFC; }
   .attach-item img{ width:100%; height:80px; object-fit:cover; display:block; }
+  .file-tile{ height:80px; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:2px; font-size:12px; color:var(--ink-soft); background:#EEF2F5; text-align:center; padding:4px; }
+  .file-tile b{ font-size:22px; line-height:1; }
   .attach-upload-btn{
     display:flex; align-items:center; justify-content:center; min-height:80px;
     border:1.5px dashed var(--border); border-radius:8px; color:var(--ink-soft); font-size:13px; cursor:pointer;
@@ -273,7 +275,7 @@
     載入中…如果這段文字一直沒有消失，代表網頁程式無法執行，請截圖回報。
   </div>
 </div>
-<div class="version-badge">store build 46</div>
+<div class="version-badge">store build 47</div>
 
 <script>
 function esc(t){ return String(t==null?'':t).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;"); }
@@ -965,7 +967,7 @@ function renderCaseDetail(){
       <div class="attach-grid" style="margin-top:10px;">
         ${state.caseDetailPhotos.map(p=>`
           <a href="${p.file_path}" target="_blank" class="attach-item" style="text-decoration:none;">
-            <img src="${p.file_path}" onerror="this.style.display='none'">
+            ${attachThumbInner(p)}
           </a>`).join("")}
       </div>
     </div>` : ""}
@@ -1799,9 +1801,30 @@ async function openCase(id){
   loadCaseDetailPhotos(id);
 }
 
+/* 附件縮圖：影片／PDF／超大圖不直接當圖片載入，避免手機網頁吃掉大量記憶體；其餘圖片延遲載入 */
+async function attachLoadMeta(list){
+  try{
+    const ids = (list||[]).map(a=>a.id);
+    if(!ids.length) return;
+    const { data } = await sb.rpc("get_attachment_meta", { p_ids: ids });
+    const m = {}; (data||[]).forEach(r=>{ m[r.id] = r; });
+    list.forEach(a=>{ if(m[a.id]){ a.mime = m[a.id].mime; a.size_bytes = m[a.id].size_bytes; } });
+  }catch(e){ console.warn("附件資訊載入失敗", e); }
+}
+function attachThumbInner(a){
+  const mime = a.mime || "";
+  const mb = a.size_bytes ? a.size_bytes/1048576 : 0;
+  const mbTxt = mb ? ` ${mb.toFixed(1)} MB` : "";
+  if(mime.startsWith("video/")) return `<div class="file-tile"><b>🎬</b>影片${mbTxt}<span style="font-size:10px;">點擊開啟</span></div>`;
+  if(mime === "application/pdf") return `<div class="file-tile"><b>📄</b>PDF${mbTxt}<span style="font-size:10px;">點擊開啟</span></div>`;
+  if(mime.startsWith("image/") && mb > 3) return `<div class="file-tile"><b>🖼</b>大圖${mbTxt}<span style="font-size:10px;">點擊開啟</span></div>`;
+  return `<img src="${a.file_path}" loading="lazy" decoding="async" onerror="this.style.display='none'">`;
+}
+
 async function loadCaseDetailPhotos(caseId){
   const { data } = await sb.from("attachments").select("*").eq("related_type","case").eq("related_id", caseId).eq("category","fault_photo_video").order("uploaded_at",{ascending:false});
   state.caseDetailPhotos = data || [];
+  await attachLoadMeta(state.caseDetailPhotos);
   if(state.view === "case-detail") render();
 }
 

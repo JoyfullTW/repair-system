@@ -132,6 +132,8 @@
   .attach-grid{ display:grid; grid-template-columns:repeat(auto-fill, minmax(110px,1fr)); gap:10px; }
   .attach-item{ border:1px solid var(--border); border-radius:8px; overflow:hidden; background:#F7FAFC; }
   .attach-item img{ width:100%; height:80px; object-fit:cover; display:block; }
+  .file-tile{ height:80px; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:2px; font-size:12px; color:var(--ink-soft); background:#EEF2F5; text-align:center; padding:4px; }
+  .file-tile b{ font-size:22px; line-height:1; }
   .attach-item .cap{ font-size:10px; color:var(--ink-soft); padding:5px 6px; }
   .attach-upload-btn{ border:1.5px dashed var(--border); border-radius:8px; height:100px; display:flex; align-items:center; justify-content:center; font-size:12px; color:var(--ink-soft); cursor:pointer; text-align:center; padding:6px; }
 
@@ -161,7 +163,7 @@
 </head>
 <body>
 <div id="app"></div>
-<div class="version-badge">admin build 64</div>
+<div class="version-badge">admin build 65</div>
 
 <script>
 function esc(t){ return String(t==null?'':t).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;"); }
@@ -542,6 +544,26 @@ function renderCaseList(){
 }
 
 /* ---------------- 案件詳情 ---------------- */
+/* ---- 附件縮圖：影片／PDF／超大圖不直接當圖片載入（避免網頁吃掉大量記憶體），其餘圖片延遲載入 ---- */
+async function attachLoadMeta(list){
+  try{
+    const ids = (list||[]).map(a=>a.id);
+    if(!ids.length) return;
+    const { data } = await sb.rpc("get_attachment_meta", { p_ids: ids });
+    const m = {}; (data||[]).forEach(r=>{ m[r.id] = r; });
+    list.forEach(a=>{ if(m[a.id]){ a.mime = m[a.id].mime; a.size_bytes = m[a.id].size_bytes; } });
+  }catch(e){ console.warn("附件資訊載入失敗", e); }
+}
+function attachThumbInner(a){
+  const mime = a.mime || "";
+  const mb = a.size_bytes ? a.size_bytes/1048576 : 0;
+  const mbTxt = mb ? ` ${mb.toFixed(1)} MB` : "";
+  if(mime.startsWith("video/")) return `<div class="file-tile"><b>🎬</b>影片${mbTxt}<span style="font-size:10px;">點擊開啟</span></div>`;
+  if(mime === "application/pdf") return `<div class="file-tile"><b>📄</b>PDF${mbTxt}<span style="font-size:10px;">點擊開啟</span></div>`;
+  if(mime.startsWith("image/") && mb > 3) return `<div class="file-tile"><b>🖼</b>大圖${mbTxt}<span style="font-size:10px;">點擊開啟</span></div>`;
+  return `<img src="${a.file_path}" loading="lazy" decoding="async" onerror="this.style.display='none'">`;
+}
+
 function renderCaseAttachmentsInner(){
   const attachCategories = Object.keys(ATTACH_CATEGORY_LABEL);
   const attachByCategory = {};
@@ -552,7 +574,7 @@ function renderCaseAttachmentsInner(){
       ${attachByCategory[cat].map(a=>`
         <div class="attach-item" style="position:relative;">
           <a href="${a.file_path}" target="_blank" style="text-decoration:none; color:inherit; display:block;">
-            <img src="${a.file_path}" onerror="this.style.display='none'">
+            ${attachThumbInner(a)}
             <div class="cap">${new Date(a.uploaded_at).toLocaleDateString('zh-TW')}</div>
           </a>
           <button type="button" data-action="delete-case-attachment" data-id="${a.id}"
@@ -1093,11 +1115,11 @@ function renderInfrastructure(){
       <div class="attach-grid">
         ${r.photo_url ? `
           <a href="${r.photo_url}" target="_blank" class="attach-item" style="text-decoration:none;">
-            <img src="${r.photo_url}" onerror="this.style.display='none'">
+            <img src="${r.photo_url}" loading="lazy" decoding="async" onerror="this.style.display='none'">
           </a>` : ""}
         ${photos.map(p=>`
           <div class="attach-item" style="position:relative;">
-            <a href="${p.file_path}" target="_blank" style="display:block;"><img src="${p.file_path}" onerror="this.style.display='none'"></a>
+            <a href="${p.file_path}" target="_blank" style="display:block;"><img src="${p.file_path}" loading="lazy" decoding="async" onerror="this.style.display='none'"></a>
             <button type="button" data-action="delete-infra-photo" data-id="${p.id}" data-record="${r.id}"
               style="position:absolute; top:4px; right:4px; background:rgba(193,63,63,.9); color:#fff; border:none; border-radius:5px; width:20px; height:20px; line-height:1; cursor:pointer; font-size:11px;">✕</button>
           </div>`).join("")}
@@ -1258,7 +1280,7 @@ function renderAssetPhotosInner(){
   return state.assetAttachments.map(p=>`
     <div class="attach-item" style="position:relative;">
       <a href="${p.file_path}" target="_blank" style="text-decoration:none; color:inherit; display:block;">
-        <img src="${p.file_path}" onerror="this.style.display='none'">
+        ${attachThumbInner(p)}
         <div class="cap">${new Date(p.uploaded_at).toLocaleDateString('zh-TW')}</div>
       </a>
       <button type="button" data-action="delete-asset-photo" data-id="${p.id}"
@@ -1898,6 +1920,7 @@ async function deleteAssetPhoto(attachmentId){
 async function loadAssetAttachments(assetId){
   const { data } = await sb.from("attachments").select("*").eq("related_type","asset").eq("related_id", assetId).order("uploaded_at", { ascending:false });
   state.assetAttachments = data || [];
+  await attachLoadMeta(state.assetAttachments);
   const panel = document.getElementById("asset-photos-panel");
   if(panel && state.view === "asset-detail"){
     panel.innerHTML = renderAssetPhotosInner();
@@ -2717,6 +2740,7 @@ async function deleteCaseAttachment(attachmentId){
 async function loadCaseAttachments(caseId){
   const { data } = await sb.from("attachments").select("*").eq("related_type","case").eq("related_id", caseId).order("uploaded_at", { ascending:false });
   state.caseAttachments = data || [];
+  await attachLoadMeta(state.caseAttachments);
   const panel = document.getElementById("case-attachments-panel");
   if(panel && state.view === "case-detail"){
     panel.innerHTML = renderCaseAttachmentsInner();
