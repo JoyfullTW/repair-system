@@ -275,7 +275,7 @@
     載入中…如果這段文字一直沒有消失，代表網頁程式無法執行，請截圖回報。
   </div>
 </div>
-<div class="version-badge">store build 47</div>
+<div class="version-badge">store build 48</div>
 
 <script>
 function esc(t){ return String(t==null?'':t).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;"); }
@@ -380,6 +380,8 @@ let state = {
   profile: null,
   storeId: null,
   storeName: "",
+  myStores: [],          // 這個帳號被授權的所有門市（超過 1 家才會顯示切換）
+  viewAll: false,        // true = 一次看我所有被授權門市的案件
   regionStoreIds: [],
   loginError: "",
   signupError: "",
@@ -665,8 +667,9 @@ function renderHome(){
   const needConfirm = all.filter(c=> c.status === "pending_store_confirm").length;
   const rows = getTabRows();
 
-  const title = isDistrictManager ? "轄區報修總覽" : (isManagement ? "全部門市案件" : "我的報修案件");
-  const sub = `${state.storeName || (isManagement ? "全部門市" : "")} · ${ROLE_LABEL[role] || ""}`;
+  const multi = state.myStores.length > 1;
+  const title = isDistrictManager ? "轄區報修總覽" : (isManagement ? "全部門市案件" : (state.viewAll ? "我的全部門市案件" : "我的報修案件"));
+  const sub = `${state.viewAll ? ('全部 '+state.myStores.length+' 家門市') : (state.storeName || (isManagement ? "全部門市" : ""))} · ${ROLE_LABEL[role] || ""}`;
 
   const storePool = isDistrictManager
     ? (state.setup?.allStores||[]).filter(st=>state.regionStoreIds.includes(st.id))
@@ -686,6 +689,7 @@ function renderHome(){
     </div>
     ${needConfirm ? `<div class="banner" style="background:#FBE3D6; color:#B45A38;">有 ${needConfirm} 件維修已完成，等你確認結果</div>` : ""}
     ${renderLineNudgeBanner()}
+    ${multi ? renderStoreSwitcher() : ""}
     <button class="btn btn-accent" data-action="go-new-report" style="font-size:16px; padding:17px;">＋ 新增報修</button>
     ${isManagement ? `
     <div class="filter-box" style="margin-top:14px;">
@@ -707,6 +711,40 @@ function renderHome(){
   ${navHtml("home")}`;
 }
 
+function storeNameById(id){
+  const f = (state.myStores||[]).find(x=>x.id===id) || (state.stores||[]).find(x=>x.id===id);
+  return f ? f.name : "";
+}
+function renderStoreSwitcher(){
+  const opts = state.myStores.map(st=>`<option value="${st.id}" ${(!state.viewAll && state.storeId===st.id)?'selected':''}>${st.code?('['+st.code+'] '):''}${esc(st.name)}</option>`).join("");
+  return `
+    <div class="filter-box" style="margin:12px 0 0;">
+      <label class="field-label" style="margin-top:0;">目前門市（你可使用 ${state.myStores.length} 家）</label>
+      <select id="my-store-switch">
+        ${opts}
+        <option value="__all" ${state.viewAll?'selected':''}>全部我的門市</option>
+      </select>
+      ${state.viewAll ? `<p style="font-size:12px; color:var(--ink-soft); margin:6px 0 0;">目前是「全部」模式。新增報修時需要自己選擇門市。</p>` : ""}
+    </div>`;
+}
+async function switchMyStore(val){
+  const uid = state.session?.user?.id || "";
+  if(val === "__all"){
+    state.viewAll = true;
+    state.storeName = "全部 "+state.myStores.length+" 家門市";
+  }else{
+    const st = state.myStores.find(x=>x.id===val);
+    if(!st) return;
+    state.viewAll = false;
+    state.storeId = st.id;
+    state.storeName = st.name;
+  }
+  try{ localStorage.setItem("cur_store_"+uid, state.viewAll ? "__all" : state.storeId); }catch(e){}
+  resetNewReport();
+  await loadMyCases();
+  render();
+}
+
 function renderMe(){
   const prof = state.profile || {};
   const canSetup = ["general_affairs","admin"].includes(prof.role);
@@ -719,7 +757,7 @@ function renderMe(){
     <div class="card" style="margin-top:-22px; position:relative;">
       <div class="info-row"><span class="k">姓名　</span>${esc(prof.display_name) || "—"}</div>
       <div class="info-row"><span class="k">角色　</span>${ROLE_LABEL[prof.role] || prof.role || "—"}</div>
-      <div class="info-row"><span class="k">門市　</span>${state.storeName || "—"}</div>
+      <div class="info-row"><span class="k">門市　</span>${state.myStores.length>1 ? esc(state.myStores.map(x=>x.name).join("、")) : (state.storeName || "—")}</div>
     </div>
     ${renderLineCard()}
     ${canSetup ? `<button class="btn btn-outline" data-action="go-setup-menu" style="margin-bottom:12px;">🏗️ 新門市建檔</button>` : ""}
@@ -735,10 +773,12 @@ function renderNewReport(){
 
   let body = "";
   if(s.step === 1){
-    const needsStorePicker = !state.storeId; // 總務/管理者/區經理等未綁定固定門市的帳號
-    const reportStorePool = state.profile?.role === "district_manager"
-      ? state.stores.filter(st=>state.regionStoreIds.includes(st.id))
-      : state.stores;
+    const needsStorePicker = !state.storeId || state.viewAll; // 總務/管理者/區經理等未綁定固定門市的帳號，或「全部」模式的多門市帳號
+    const reportStorePool = state.viewAll
+      ? state.myStores
+      : (state.profile?.role === "district_manager"
+          ? state.stores.filter(st=>state.regionStoreIds.includes(st.id))
+          : state.stores);
     const storeOptions = reportStorePool.map(st=>`<option value="${st.id}" ${s.selectedStoreId===st.id?'selected':''}>${st.code ? '['+st.code+'] ' : ''}${st.name}</option>`).join("");
     const typeCardsDisabled = needsStorePicker && !s.selectedStoreId;
     body = `
@@ -807,7 +847,7 @@ function renderNewReport(){
       </div>
       <div class="card" style="margin-top:20px;">
         <strong style="font-size:14px;">送出前確認</strong>
-        <p style="font-size:13px; color:var(--ink-soft); margin:8px 0 2px;">所屬門市：${state.storeName || (state.stores.find(st=>st.id===s.selectedStoreId)||{}).name || '—'}</p>
+        <p style="font-size:13px; color:var(--ink-soft); margin:8px 0 2px;">所屬門市：${(state.viewAll ? storeNameById(s.selectedStoreId) : state.storeName) || storeNameById(s.selectedStoreId) || '—'}</p>
         <p style="font-size:13px; color:var(--ink-soft); margin:2px 0;">類型：${s.repairType==='asset'?('資產：'+(s.assetLabel||'—')):('一般報修：'+(s.generalCategory||'—'))}</p>
         <p style="font-size:13px; color:var(--ink-soft); margin:2px 0;">報告日期：${s.reportDate||'—'}</p>
         <p style="font-size:13px; color:var(--ink-soft); margin:2px 0;">報修設備：${s.faultCategory||'—'}</p>
@@ -818,8 +858,8 @@ function renderNewReport(){
   }
 
   // 代表門市持續提示：非固定門市帳號在步驟 1 之後，每一步都能看到目前選的是哪間門市，避免選錯後忘記
-  const storeBanner = (!state.storeId && s.selectedStoreId)
-    ? `<div class="banner" style="background:var(--chip-bg); color:var(--ink); font-weight:700;">🏬 代表門市：${(state.stores.find(st=>st.id===s.selectedStoreId)||{}).name || ''}</div>`
+  const storeBanner = ((!state.storeId || state.viewAll) && s.selectedStoreId)
+    ? `<div class="banner" style="background:var(--chip-bg); color:var(--ink); font-weight:700;">🏬 代表門市：${esc(storeNameById(s.selectedStoreId))}</div>`
     : "";
 
   return `
@@ -862,7 +902,7 @@ function ticketHtml(c){
   const tone = statusTone(c.status);
   const closed = CLOSED_STATUSES.includes(c.status);
   const urg = c.urgency === "urgent" ? ["urgent","急件"] : c.urgency === "operational" ? ["operational","影響營運"] : ["","普通"];
-  const where = [c.store_name && !state.storeId ? c.store_name : null, c.asset_name].filter(Boolean).join(" · ");
+  const where = [c.store_name && (!state.storeId || state.viewAll) ? c.store_name : null, c.asset_name].filter(Boolean).join(" · ");
   const right = c.status === "pending_store_confirm" ? `<span class="upd act">待你確認</span>`
               : c.status === "pending_info" ? `<span class="upd act">待你補資料</span>`
               : `<span class="upd">${closed ? (mdShort(c.closed_at || c.updated_at) + ' 結案') : relTime(c.updated_at || c.created_at)}</span>`;
@@ -1215,6 +1255,8 @@ function bindEvents(){
   });
   const search = document.getElementById("asset-search");
   if(search) search.addEventListener("input", onAssetSearch);
+  const storeSwitch = document.getElementById("my-store-switch");
+  if(storeSwitch) storeSwitch.addEventListener("change", (e)=>{ switchMyStore(e.target.value); });
   const storePicker = document.getElementById("report-store-picker");
   if(storePicker) storePicker.addEventListener("change", (e)=>{
     state.newReport.selectedStoreId = e.target.value || null;
@@ -1608,7 +1650,7 @@ let assetSearchTimer = null;
 function onAssetSearch(e){
   clearTimeout(assetSearchTimer);
   const q = e.target.value.trim();
-  const effectiveStoreId = state.storeId || state.newReport.selectedStoreId;
+  const effectiveStoreId = state.viewAll ? state.newReport.selectedStoreId : (state.storeId || state.newReport.selectedStoreId);
   assetSearchTimer = setTimeout(async ()=>{
     const box = document.getElementById("asset-results");
     if(!q){ box.innerHTML = "輸入關鍵字開始搜尋…"; return; }
@@ -1674,7 +1716,7 @@ async function submitReport(){
 
 async function _submitReportInner(){
   const s = state.newReport;
-  const effectiveStoreId = state.storeId || s.selectedStoreId;
+  const effectiveStoreId = state.viewAll ? s.selectedStoreId : (state.storeId || s.selectedStoreId);
 
   if(!effectiveStoreId){
     alert("尚未選擇門市，無法送出報修。");
@@ -1774,7 +1816,9 @@ function printCaseList(){
 
 async function loadMyCases(){
   let query = sb.from("cases").select("*, assets(name), stores(name)").is("deleted_at", null).order("created_at", { ascending:false });
-  if(state.storeId){
+  if(state.viewAll && state.myStores.length){
+    query = query.in("store_id", state.myStores.map(x=>x.id)).limit(300);
+  }else if(state.storeId){
     query = query.eq("store_id", state.storeId);
   }else if(state.myCasesStoreFilter){
     query = query.eq("store_id", state.myCasesStoreFilter);
@@ -2155,6 +2199,9 @@ async function saveAssetNameMobile(){
 async function loadSetupAssetAttachments(assetId){
   const { data } = await sb.from("attachments").select("*").eq("related_type","asset").eq("related_id", assetId).order("uploaded_at",{ascending:false});
   state.setup.photoAssetAttachments = data || [];
+  // 同步清單上的「有照片／尚無照片」標示（上傳或刪除後立即更新）
+  const listItem = (state.setup.photoAssetResults||[]).find(a=>a.id===assetId);
+  if(listItem) listItem.hasPhoto = (data||[]).length > 0;
   render();
 }
 
@@ -2326,7 +2373,7 @@ async function doSignup(){
 
 async function doLogout(){
   await sb.auth.signOut();
-  state.session = null; state.profile = null; state.storeId = null; state.storeName = "";
+  state.session = null; state.profile = null; state.storeId = null; state.storeName = ""; state.myStores = []; state.viewAll = false;
   state.view = "login";
   render();
 }
@@ -2353,6 +2400,25 @@ async function loadProfileAndEnter(){
     const { data: regionStores } = await sb.from("stores").select("id").eq("region_id", profile.region_id);
     state.regionStoreIds = (regionStores||[]).map(s=>s.id);
     state.storeName = `${profile.regions?.name || "轄區"}總覽`;
+  }
+
+  state.myStores = []; state.viewAll = false;
+  if(profile.role === "store"){
+    try{
+      const { data: us } = await sb.from("user_stores").select("store_id, stores(id, code, name, status)").eq("user_id", session.user.id);
+      const list = (us||[]).map(r=>r.stores).filter(x=>x && x.status === "active").sort((a,b)=>String(a.code||"").localeCompare(String(b.code||"")));
+      if(list.length > 1){
+        state.myStores = list;
+        let saved = null;
+        try{ saved = localStorage.getItem("cur_store_"+session.user.id); }catch(e){}
+        if(saved === "__all"){
+          state.viewAll = true; state.storeName = "全部 "+list.length+" 家門市";
+        }else{
+          const pick = list.find(x=>x.id===saved) || list.find(x=>x.id===profile.store_id) || list[0];
+          state.storeId = pick.id; state.storeName = pick.name;
+        }
+      }
+    }catch(e){ /* 讀不到就維持單一門市 */ }
   }
 
   try{ await loadMyLineBindings(); }catch(e){}

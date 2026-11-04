@@ -163,7 +163,7 @@
 </head>
 <body>
 <div id="app"></div>
-<div class="version-badge">admin build 65</div>
+<div class="version-badge">admin build 66</div>
 
 <script>
 function esc(t){ return String(t==null?'':t).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;"); }
@@ -835,6 +835,14 @@ function renderAccounts(){
                 <option value="">— 不綁定 —</option>
                 ${state.stores.filter(s=>s.status==='active').map(s=>`<option value="${s.id}" ${u.store_id===s.id?'selected':''}>${s.name}</option>`).join("")}
               </select>
+              ${u.role==='store' ? (()=>{ const ex=(state.accountStores||{})[u.id]||[]; const n=ex.filter(x=>x!==u.store_id).length; return `
+              <details style="margin-top:6px;">
+                <summary style="font-size:12px; color:var(--steel,#3A6B8C); cursor:pointer;">另外可用門市${n?`（已加 ${n} 家）`:'（無）'}</summary>
+                <div data-extra-stores="${u.id}" style="max-height:180px; overflow:auto; border:1px solid var(--line,#ddd); border-radius:8px; padding:6px 8px; margin-top:4px; font-size:13px;">
+                  ${state.stores.filter(s=>s.status==='active').map(s=>`<label style="display:block; padding:3px 0; white-space:nowrap;"><input type="checkbox" value="${s.id}" ${ex.includes(s.id)?'checked':''}> ${s.code?('['+s.code+'] '):''}${esc(s.name)}</label>`).join("")}
+                </div>
+                <div style="font-size:11px; color:var(--ink-soft); margin-top:3px;">上方「門市」是預設門市；勾選的是額外可報修／查看的門市。</div>
+              </details>`; })() : ""}
             </td>
             <td>
               <select data-field="region_id" data-id="${u.id}">
@@ -2480,6 +2488,12 @@ async function loadAccounts(){
   if(error){ alert("載入失敗：" + error.message); return; }
   state.accounts = data || [];
   try{
+    const { data: us } = await sb.from("user_stores").select("user_id, store_id");
+    const sm = {};
+    (us||[]).forEach(r=>{ (sm[r.user_id] = sm[r.user_id] || []).push(r.store_id); });
+    state.accountStores = sm;
+  }catch(e){ state.accountStores = {}; }
+  try{
     const { data: lb } = await sb.from("user_line_bindings").select("profile_id, line_display_name, person_name, friend_flag");
     const m = {};
     (lb||[]).forEach(b=>{ (m[b.profile_id] = m[b.profile_id] || []).push(b); });
@@ -3055,6 +3069,22 @@ async function saveAccount(id){
 
   const { error } = await sb.from("users_profile").update({ role, store_id: storeId, region_id: regionId, status }).eq("id", id);
   if(error){ alert("儲存失敗：" + error.message); return; }
+
+  // 同步「可使用門市」：預設門市 + 勾選的額外門市（只有門市人員角色才有額外門市）
+  try{
+    const box = row.querySelector(`[data-extra-stores="${id}"]`);
+    const checked = box ? [...box.querySelectorAll('input[type=checkbox]:checked')].map(x=>x.value) : [];
+    const desired = new Set(role === "store" ? checked : []);
+    if(storeId) desired.add(storeId);
+    const { data: cur } = await sb.from("user_stores").select("store_id").eq("user_id", id);
+    const have = new Set((cur||[]).map(r=>r.store_id));
+    const toAdd = [...desired].filter(x=>!have.has(x));
+    const toDel = [...have].filter(x=>!desired.has(x));
+    if(toAdd.length){ const r1 = await sb.from("user_stores").insert(toAdd.map(sid=>({ user_id:id, store_id:sid }))); if(r1.error) throw r1.error; }
+    if(toDel.length){ const r2 = await sb.from("user_stores").delete().eq("user_id", id).in("store_id", toDel); if(r2.error) throw r2.error; }
+    state.accountStores = state.accountStores || {};
+    state.accountStores[id] = [...desired];
+  }catch(e){ alert("帳號已儲存，但「額外門市」更新失敗：" + (e.message||e)); }
 
   // 從「待審核」改成啟用時，順便自動確認 Email，避免帳號卡在「Email not confirmed」無法登入
   if(wasDisabled && status === "active"){
