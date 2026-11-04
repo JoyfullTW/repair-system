@@ -275,7 +275,7 @@
     載入中…如果這段文字一直沒有消失，代表網頁程式無法執行，請截圖回報。
   </div>
 </div>
-<div class="version-badge">store build 48</div>
+<div class="version-badge">store build 49</div>
 
 <script>
 function esc(t){ return String(t==null?'':t).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;"); }
@@ -2384,7 +2384,7 @@ async function loadProfileAndEnter(){
   if(!session){ state.view = "login"; render(); return; }
 
   const { data: profile, error } = await sb.from("users_profile")
-    .select("*, stores(name), regions(name)").eq("id", session.user.id).maybeSingle();
+    .select("*, stores!users_profile_store_id_fkey(name), regions(name)").eq("id", session.user.id).maybeSingle();
 
   if(error || !profile || profile.status !== "active"){
     state.view = "profile-missing";
