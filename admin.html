@@ -163,7 +163,7 @@
 </head>
 <body>
 <div id="app"></div>
-<div class="version-badge">admin build 66</div>
+<div class="version-badge">admin build 67</div>
 
 <script>
 function esc(t){ return String(t==null?'':t).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;"); }
@@ -283,6 +283,7 @@ let state = {
   vendorFormError: "",
   maintenanceRows: [], maintenanceFilters: { storeId:"", category:"", dueOnly:false }, maintenanceFormError: "",
   showMaintenanceForm: false, maintenanceBatchStoreIds: [],
+  vendorWeekly: { groups: [], loadedAt: null, loading: false, error: "", hideNoPending: true },
   relatedParentCase: null, relatedChildCases: [], showDeriveCaseForm: false,
 };
 
@@ -360,6 +361,7 @@ function renderSidebar(){
     { key:"manuals", label:"設備說明書", ico:"📖" },
     ...(canManageAccounts ? [{ key:"accounts", label:"帳號管理", ico:"👤", badge: badges.pendingAccounts }] : []),
     { key:"vendors", label:"廠商管理", ico:"🧰" },
+    { key:"vendor-weekly", label:"廠商週報", ico:"📨" },
     { key:"assignment-rules", label:"廠商指派規則", ico:"🗂️" },
     { key:"maintenance", label:"定期保養", ico:"🛠️", badge: badges.overdueMaintenance },
   ];
@@ -381,7 +383,7 @@ function renderSidebar(){
 }
 
 function renderTopbar(){
-  const titles = { dashboard:"Dashboard", "case-list":"案件列表", "case-detail":"案件詳情", assets:"資產管理", "asset-detail":"資產詳情", stores:"門市管理", contacts:"通訊錄", infrastructure:"門市基礎設施", manuals:"設備說明書", accounts:"帳號管理", vendors:"廠商管理", "assignment-rules":"廠商指派規則", maintenance:"定期保養" };
+  const titles = { dashboard:"Dashboard", "case-list":"案件列表", "case-detail":"案件詳情", assets:"資產管理", "asset-detail":"資產詳情", stores:"門市管理", contacts:"通訊錄", infrastructure:"門市基礎設施", manuals:"設備說明書", accounts:"帳號管理", vendors:"廠商管理", "vendor-weekly":"廠商週報", "assignment-rules":"廠商指派規則", maintenance:"定期保養" };
   const showBack = state.view === "case-detail" || state.view === "asset-detail";
   return `
   <div class="topbar">
@@ -402,6 +404,7 @@ function renderViewBody(){
   if(state.view === "manuals") return renderManuals();
   if(state.view === "accounts") return ["general_affairs_supervisor","admin"].includes(state.profile?.role) ? renderAccounts() : `<div class="empty">你沒有權限查看這個頁面</div>`;
   if(state.view === "vendors") return renderVendors();
+  if(state.view === "vendor-weekly") return renderVendorWeekly();
   if(state.view === "assignment-rules") return renderAssignmentRules();
   if(state.view === "maintenance") return renderMaintenance();
   return "";
@@ -1665,6 +1668,10 @@ async function onAction(e){
   else if(action === "quick-add-vendor"){ await quickAddVendor(); }
   else if(action === "save-account"){ await saveAccount(el.dataset.id); }
   else if(action === "add-vendor"){ await addVendor(); }
+  else if(action === "weekly-refresh"){ await loadVendorWeekly(); }
+  else if(action === "weekly-copy"){ copyVendorWeekly(el.dataset.id, el); }
+  else if(action === "weekly-print"){ printVendorWeekly(el.dataset.id); }
+  else if(action === "weekly-print-all"){ printVendorWeekly(null); }
   else if(action === "edit-vendor-row"){ state.editingVendorId = el.dataset.id; render(); }
   else if(action === "view-vendor-cases"){
     const f = { status:"", storeId:"", urgency:"", q:"", hideClosed:true, overdueOnly:false, showArchived:false, vendorId: el.dataset.id };
@@ -2519,6 +2526,7 @@ async function goTo(view){
   else if(view === "manuals"){ await loadAssetMajorCategories(); await loadAssetMinorCategories(); await loadVendors(); await loadManuals(); }
   else if(view === "accounts"){ await loadRegions(); await loadAccounts(); }
   else if(view === "vendors") await loadVendors();
+  else if(view === "vendor-weekly"){ await loadVendors(); await loadVendorWeekly(); }
   else if(view === "assignment-rules") await loadVendors();
   else if(view === "maintenance"){ await loadStores(); await loadVendors(); await loadRegions(); await loadMaintenanceRows(); }
   await loadSidebarBadgeCounts();
@@ -3003,6 +3011,176 @@ function copyCaseInfo(){
   }).catch(()=>{
     prompt("請手動複製以下內容：", text);
   });
+}
+
+
+/* ============================================================
+   廠商週報：每家廠商手上未結案件，可複製成 LINE 文字或列印
+   ============================================================ */
+function weeklyMd(iso){ const d = new Date(iso); return (d.getMonth()+1) + "/" + d.getDate(); }
+function weeklyCut(t, n){ t = String(t||"").replace(/\s+/g," ").trim(); return t.length > n ? t.slice(0,n) + "…" : t; }
+
+async function loadVendorWeekly(){
+  const w = state.vendorWeekly;
+  w.loading = true; w.error = ""; render();
+  try{
+    let q = scopedCaseQuery(sb.from("cases").select("id, case_no, store_id, vendor_id, urgency, status, fault_category, general_category, fault_reason, fault_description, report_date, created_at, updated_at, stores(name)")
+      .is("deleted_at", null).not("vendor_id", "is", null).not("status", "in", "(closed,cancelled)")
+      .order("created_at", { ascending:true }).limit(1000));
+    const { data: rows, error } = await q;
+    if(error) throw error;
+    const latest = {};
+    const ids = (rows||[]).map(c=>c.id);
+    for(let i=0; i<ids.length; i+=25){
+      const { data } = await sb.from("case_logs").select("case_id, note, created_at").in("case_id", ids.slice(i,i+25)).order("created_at", { ascending:false }).limit(3000);
+      (data||[]).forEach(l=>{ if(!latest[l.case_id]) latest[l.case_id] = l; });
+    }
+    const nowMs = Date.now();
+    const byVendor = {};
+    (rows||[]).forEach(c=>{
+      const lg = latest[c.id];
+      const lastIso = lg ? lg.created_at : (c.updated_at || c.created_at);
+      const days = Math.floor((nowMs - new Date(lastIso).getTime()) / 86400000);
+      const item = {
+        id: c.id, case_no: c.case_no, store: c.stores?.name || "", urgency: c.urgency, status: c.status,
+        item: c.fault_category || c.general_category || "", reason: c.fault_reason || c.fault_description || "",
+        created: c.report_date || c.created_at, logDate: lg ? lg.created_at : null, logNote: lg ? lg.note : "", days
+      };
+      (byVendor[c.vendor_id] = byVendor[c.vendor_id] || []).push(item);
+    });
+    const urgRank = { urgent:0, operational:1, normal:2 };
+    w.groups = Object.keys(byVendor).map(vid=>{
+      const v = state.vendors.find(x=>x.id===vid);
+      const items = byVendor[vid].sort((a,b)=> (urgRank[a.urgency]??3)-(urgRank[b.urgency]??3) || b.days-a.days);
+      return { vendorId: vid, vendorName: v ? v.name : "（已刪除的廠商）", contact: v ? (v.contact_person||"") : "", line: v ? (v.line_contact||"") : "", items };
+    }).sort((a,b)=> b.items.length - a.items.length || a.vendorName.localeCompare(b.vendorName, "zh-Hant"));
+    w.loadedAt = new Date();
+  }catch(e){
+    console.error(e); w.error = e.message || String(e);
+  }
+  w.loading = false; render();
+}
+
+function buildVendorWeeklyText(g){
+  const w = state.vendorWeekly;
+  const d = (w.loadedAt || new Date());
+  const dateStr = d.getFullYear() + "/" + (d.getMonth()+1) + "/" + d.getDate();
+  const lines = [];
+  lines.push(`【台灣珍有福 維修案件週報】${dateStr}`);
+  lines.push(`${g.vendorName} 您好，以下是目前貴司手上尚未完成的案件，共 ${g.items.length} 筆：`);
+  lines.push("");
+  g.items.forEach((it,i)=>{
+    const desc = [it.item, weeklyCut(it.reason, 30)].filter(Boolean).join("（") + (it.reason && it.item ? "）" : "");
+    lines.push(`${i+1}. #${it.case_no}｜${it.store}`);
+    lines.push(`   ${desc}`);
+    lines.push(`   ${URGENCY_LABEL[it.urgency]||""}｜${STATUS_LABEL[it.status]||it.status}｜${weeklyMd(it.created)} 報修`);
+    if(it.logDate){
+      lines.push(`   最新進度 ${weeklyMd(it.logDate)}${it.days >= 7 ? `（已 ${it.days} 天無進度）` : ""}：${weeklyCut(it.logNote, 50) || "（無說明）"}`);
+    } else {
+      lines.push(`   最新進度：尚無紀錄`);
+    }
+    lines.push("");
+  });
+  lines.push("麻煩協助回覆各案件目前進度，以及預計到場／完工日期，謝謝！");
+  return lines.join("\n");
+}
+
+function copyVendorWeekly(vendorId, el){
+  const g = state.vendorWeekly.groups.find(x=>x.vendorId===vendorId);
+  if(!g) return;
+  const text = buildVendorWeeklyText(g);
+  const done = ()=>{ if(el){ const old = el.textContent; el.textContent = "已複製 ✓"; setTimeout(()=>{ el.textContent = old; }, 1400); } };
+  navigator.clipboard.writeText(text).then(done).catch(()=>{ prompt("請手動複製以下內容：", text); });
+}
+
+function printVendorWeekly(vendorId){
+  const w = state.vendorWeekly;
+  const groups = vendorId ? w.groups.filter(x=>x.vendorId===vendorId) : w.groups;
+  if(groups.length === 0){ alert("沒有可列印的內容"); return; }
+  const win = window.open("", "_blank");
+  if(!win){ alert("瀏覽器擋住了彈出視窗，請允許彈出視窗後再試一次"); return; }
+  const now = (w.loadedAt || new Date()).toLocaleString('zh-TW');
+  const html = `<!DOCTYPE html><html lang="zh-Hant"><head><meta charset="UTF-8"><title>廠商維修案件週報</title>
+    <style>
+      body{ font-family:"Noto Sans TC", sans-serif; padding:24px; color:#1E2A32; }
+      h1{ font-size:18px; margin:0 0 4px; } h2{ font-size:15px; margin:0 0 4px; }
+      .meta{ font-size:12px; color:#333; margin-bottom:10px; }
+      section{ page-break-after:always; margin-bottom:28px; } section:last-child{ page-break-after:auto; }
+      table{ width:100%; border-collapse:collapse; font-size:11.5px; }
+      th, td{ border:1px solid #ccc; padding:5px 7px; text-align:left; vertical-align:top; }
+      th{ background:#f4f7f9; } thead{ display:table-header-group; } tr{ page-break-inside:avoid; }
+      tr[data-urgent="1"] td:first-child{ border-left:4px solid #C13F3F; }
+      .sub{ color:#666; font-size:10.5px; margin-top:2px; } .stale{ color:#B42318; font-weight:700; } .nolog{ color:#999; }
+      @media print{ body{ padding:8px; } }
+    </style></head><body>
+    ${groups.map(g=>`
+    <section>
+      <h1>${esc(g.vendorName)}　維修案件清單</h1>
+      <div class="meta">台灣珍有福　列印時間：${now}　共 ${g.items.length} 筆（不含已結案／取消）</div>
+      <table>
+        <thead><tr><th style="width:108px;">案件編號</th><th style="width:78px;">門市</th><th style="width:140px;">設備／類別</th><th style="width:56px;">緊急</th><th style="width:80px;">目前狀態</th><th style="width:52px;">報修</th><th>最新進度</th></tr></thead>
+        <tbody>
+        ${g.items.map(it=>`
+          <tr data-urgent="${it.urgency==='urgent'?1:0}">
+            <td>#${esc(it.case_no)}</td><td>${esc(it.store)}</td>
+            <td>${esc(it.item)}${it.reason ? `<div class="sub">${esc(weeklyCut(it.reason, 40))}</div>` : ''}</td>
+            <td>${URGENCY_LABEL[it.urgency]||''}</td><td>${STATUS_LABEL[it.status]||it.status}</td><td>${weeklyMd(it.created)}</td>
+            <td>${it.logDate ? `<div><b>${weeklyMd(it.logDate)}</b>${it.days>=7 ? ` <span class="stale">（${it.days} 天無進度）</span>` : ''}</div><div>${esc(weeklyCut(it.logNote, 70)) || '<span class="nolog">（無說明）</span>'}</div>` : '<span class="nolog">尚無紀錄</span>'}</td>
+          </tr>`).join("")}
+        </tbody>
+      </table>
+    </section>`).join("")}
+  </body></html>`;
+  win.document.open(); win.document.write(html); win.document.close();
+  const go = ()=>{ try{ if(win.__printed) return; win.__printed = true; win.print(); }catch(e){} };
+  win.onload = go; setTimeout(go, 800);
+}
+
+function renderVendorWeekly(){
+  const w = state.vendorWeekly;
+  const total = w.groups.reduce((n,g)=>n+g.items.length, 0);
+  const stale = w.groups.reduce((n,g)=>n+g.items.filter(i=>i.days>=7).length, 0);
+  return `
+  <div class="card">
+    <div style="display:flex; flex-wrap:wrap; gap:10px; align-items:center; justify-content:space-between;">
+      <div>
+        <b>每週一：把各廠商手上的未結案件，一次傳給廠商</b>
+        <div class="sub" style="margin-top:4px;">${w.loading ? "載入中…" : (w.loadedAt ? `資料時間：${w.loadedAt.toLocaleString('zh-TW')}　共 ${w.groups.length} 家廠商、${total} 筆案件${stale ? `，其中 <b style="color:var(--err,#C13F3F);">${stale} 筆超過 7 天無進度</b>` : ""}` : "")}</div>
+      </div>
+      <div style="display:flex; gap:8px;">
+        <button class="btn btn-outline btn-sm" data-action="weekly-refresh">↻ 重新整理</button>
+        <button class="btn btn-primary btn-sm" data-action="weekly-print-all">🖨 全部列印</button>
+      </div>
+    </div>
+    <div class="sub" style="margin-top:8px;">按「複製 LINE 文字」後，到該廠商的 LINE 貼上送出即可。內容不含費用與報價。只包含已指派廠商、且尚未結案／取消的案件。</div>
+    ${w.error ? `<div class="error-msg">載入失敗：${esc(w.error)}</div>` : ""}
+  </div>
+  ${(!w.loading && !w.error && w.groups.length === 0) ? `<div class="empty">目前沒有已指派廠商的未結案件</div>` : ""}
+  ${w.groups.map(g=>`
+  <div class="card" style="padding:0; overflow-x:auto;">
+    <div style="display:flex; flex-wrap:wrap; gap:8px; align-items:center; justify-content:space-between; padding:12px 14px; border-bottom:1px solid var(--line,#E3E8EC);">
+      <div><b>${esc(g.vendorName)}</b>　<span class="sub">${g.items.length} 筆${g.contact ? `　聯絡人：${esc(g.contact)}` : ""}${g.line ? `　LINE：${esc(g.line)}` : ""}</span></div>
+      <div style="display:flex; gap:8px;">
+        <button class="btn btn-primary btn-sm" data-action="weekly-copy" data-id="${g.vendorId}">📋 複製 LINE 文字</button>
+        <button class="btn btn-outline btn-sm" data-action="weekly-print" data-id="${g.vendorId}">🖨 列印</button>
+      </div>
+    </div>
+    <table>
+      <thead><tr><th>案件編號</th><th>門市</th><th>設備／類別</th><th>緊急</th><th>目前狀態</th><th>報修</th><th>最新進度</th></tr></thead>
+      <tbody>
+        ${g.items.map(it=>`
+        <tr ${it.urgency==='urgent' ? 'style="box-shadow:inset 4px 0 0 var(--err,#C13F3F);"' : ''}>
+          <td style="white-space:nowrap;">#${esc(it.case_no)}</td>
+          <td>${esc(it.store)}</td>
+          <td>${esc(it.item)}${it.reason ? `<div class="sub">${esc(weeklyCut(it.reason, 40))}</div>` : ""}</td>
+          <td>${URGENCY_LABEL[it.urgency]||""}</td>
+          <td>${STATUS_LABEL[it.status]||it.status}</td>
+          <td>${weeklyMd(it.created)}</td>
+          <td>${it.logDate ? `<b>${weeklyMd(it.logDate)}</b>${it.days>=7 ? ` <span style="color:var(--err,#C13F3F); font-weight:700;">（${it.days} 天無進度）</span>` : ""}<div>${esc(weeklyCut(it.logNote, 70)) || "（無說明）"}</div>` : `<span class="sub">尚無紀錄</span>`}</td>
+        </tr>`).join("")}
+      </tbody>
+    </table>
+  </div>`).join("")}`;
 }
 
 async function quickAddVendor(){
