@@ -163,7 +163,7 @@
 </head>
 <body>
 <div id="app"></div>
-<div class="version-badge">admin build 67</div>
+<div class="version-badge">admin build 69</div>
 
 <script>
 function esc(t){ return String(t==null?'':t).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;"); }
@@ -1670,6 +1670,7 @@ async function onAction(e){
   else if(action === "add-vendor"){ await addVendor(); }
   else if(action === "weekly-refresh"){ await loadVendorWeekly(); }
   else if(action === "weekly-copy"){ copyVendorWeekly(el.dataset.id, el); }
+  else if(action === "weekly-image"){ await imageVendorWeekly(el.dataset.id, el); }
   else if(action === "weekly-print"){ printVendorWeekly(el.dataset.id); }
   else if(action === "weekly-print-all"){ printVendorWeekly(null); }
   else if(action === "edit-vendor-row"){ state.editingVendorId = el.dataset.id; render(); }
@@ -3064,24 +3065,21 @@ async function loadVendorWeekly(){
 function buildVendorWeeklyText(g){
   const w = state.vendorWeekly;
   const d = (w.loadedAt || new Date());
-  const dateStr = d.getFullYear() + "/" + (d.getMonth()+1) + "/" + d.getDate();
+  const dateStr = (d.getMonth()+1) + "/" + d.getDate();
   const lines = [];
-  lines.push(`【台灣珍有福 維修案件週報】${dateStr}`);
-  lines.push(`${g.vendorName} 您好，以下是目前貴司手上尚未完成的案件，共 ${g.items.length} 筆：`);
-  lines.push("");
+  lines.push(`【珍有福 未完成案件】${dateStr}`);
+  lines.push(`${g.vendorName} 您好，目前共 ${g.items.length} 筆：`);
   g.items.forEach((it,i)=>{
-    const desc = [it.item, weeklyCut(it.reason, 30)].filter(Boolean).join("（") + (it.reason && it.item ? "）" : "");
-    lines.push(`${i+1}. #${it.case_no}｜${it.store}`);
-    lines.push(`   ${desc}`);
-    lines.push(`   ${URGENCY_LABEL[it.urgency]||""}｜${STATUS_LABEL[it.status]||it.status}｜${weeklyMd(it.created)} 報修`);
-    if(it.logDate){
-      lines.push(`   最新進度 ${weeklyMd(it.logDate)}${it.days >= 7 ? `（已 ${it.days} 天無進度）` : ""}：${weeklyCut(it.logNote, 50) || "（無說明）"}`);
-    } else {
-      lines.push(`   最新進度：尚無紀錄`);
-    }
+    const urg = it.urgency === "urgent" ? "【緊急】" : (it.urgency === "operational" ? "【影響營運】" : "");
+    const desc = [it.item, weeklyCut(it.reason, 14)].filter(Boolean).join("：");
     lines.push("");
+    lines.push(`${i+1}. ${urg}${it.store}`);
+    if(desc) lines.push(desc);
+    lines.push(`${STATUS_LABEL[it.status]||it.status}（${weeklyMd(it.created)} 報修）`);
+    lines.push(`案號 ${it.case_no}`);
   });
-  lines.push("麻煩協助回覆各案件目前進度，以及預計到場／完工日期，謝謝！");
+  lines.push("");
+  lines.push("請協助回覆各案進度與預計到場／完工日，謝謝！");
   return lines.join("\n");
 }
 
@@ -3091,6 +3089,83 @@ function copyVendorWeekly(vendorId, el){
   const text = buildVendorWeeklyText(g);
   const done = ()=>{ if(el){ const old = el.textContent; el.textContent = "已複製 ✓"; setTimeout(()=>{ el.textContent = old; }, 1400); } };
   navigator.clipboard.writeText(text).then(done).catch(()=>{ prompt("請手動複製以下內容：", text); });
+}
+
+function loadHtml2Canvas(){
+  if(window.html2canvas) return Promise.resolve(window.html2canvas);
+  return new Promise((resolve, reject)=>{
+    const sc = document.createElement("script");
+    sc.src = "https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js";
+    sc.onload = ()=> window.html2canvas ? resolve(window.html2canvas) : reject(new Error("html2canvas 載入失敗"));
+    sc.onerror = ()=> reject(new Error("無法載入圖片工具（網路問題）"));
+    document.head.appendChild(sc);
+  });
+}
+
+// 產生「給廠商看」的圖片：只含案件基本資料，不含最新進度與廠商更換紀錄
+async function imageVendorWeekly(vendorId, el){
+  const g = state.vendorWeekly.groups.find(x=>x.vendorId===vendorId);
+  if(!g) return;
+  const old = el ? el.textContent : "";
+  if(el){ el.textContent = "產生中…"; el.disabled = true; }
+  let box;
+  try{
+    const h2c = await loadHtml2Canvas();
+    const d = state.vendorWeekly.loadedAt || new Date();
+    const dateStr = d.getFullYear() + "/" + (d.getMonth()+1) + "/" + d.getDate();
+    box = document.createElement("div");
+    box.style.cssText = "position:fixed; left:-10000px; top:0; width:760px; background:#fff; color:#1E2A32; padding:22px 24px; font-family:'Noto Sans TC','PingFang TC','Microsoft JhengHei',sans-serif;";
+    box.innerHTML = `
+      <div style="font-size:21px; font-weight:700;">${esc(g.vendorName)}　未完成案件</div>
+      <div style="font-size:14px; color:#4A5A66; margin:4px 0 14px;">台灣珍有福　${dateStr}　共 ${g.items.length} 筆</div>
+      <table style="width:100%; border-collapse:collapse; font-size:15px;">
+        <thead><tr style="background:#EEF3F6;">
+          <th style="border:1px solid #BFCAD2; padding:8px 8px; text-align:left;">門市</th>
+          <th style="border:1px solid #BFCAD2; padding:8px 8px; text-align:left;">設備／問題</th>
+          <th style="border:1px solid #BFCAD2; padding:8px 8px; text-align:left; white-space:nowrap;">目前狀態</th>
+          <th style="border:1px solid #BFCAD2; padding:8px 8px; text-align:left; white-space:nowrap;">報修日</th>
+        </tr></thead>
+        <tbody>
+        ${g.items.map(it=>`
+          <tr>
+            <td style="border:1px solid #BFCAD2; padding:8px; vertical-align:top; ${it.urgency==='urgent' ? 'border-left:6px solid #C13F3F;' : ''}">${esc(it.store)}${it.urgency==='urgent' ? `<div style="color:#C13F3F; font-weight:700; font-size:13px;">緊急</div>` : (it.urgency==='operational' ? `<div style="color:#B54708; font-weight:700; font-size:13px;">影響營運</div>` : '')}</td>
+            <td style="border:1px solid #BFCAD2; padding:8px; vertical-align:top;">${esc(it.item)}${it.reason ? `<div style="font-size:13px; color:#4A5A66;">${esc(weeklyCut(it.reason, 24))}</div>` : ''}<div style="font-size:12px; color:#7A8893;">案號 ${esc(it.case_no)}</div></td>
+            <td style="border:1px solid #BFCAD2; padding:8px; vertical-align:top; white-space:nowrap;">${STATUS_LABEL[it.status]||it.status}</td>
+            <td style="border:1px solid #BFCAD2; padding:8px; vertical-align:top; white-space:nowrap;">${weeklyMd(it.created)}</td>
+          </tr>`).join("")}
+        </tbody>
+      </table>
+      <div style="font-size:14px; margin-top:12px;">請協助回覆各案進度與預計到場／完工日，謝謝！</div>`;
+    document.body.appendChild(box);
+    if(document.fonts && document.fonts.ready) await document.fonts.ready;
+    const canvas = await h2c(box, { scale: 2, backgroundColor: "#ffffff" });
+    const blob = await new Promise(res=>canvas.toBlob(res, "image/png"));
+    if(!blob) throw new Error("圖片轉換失敗");
+    let copied = false;
+    try{
+      if(navigator.clipboard && window.ClipboardItem){
+        await navigator.clipboard.write([ new ClipboardItem({ "image/png": blob }) ]);
+        copied = true;
+      }
+    }catch(e){ copied = false; }
+    if(copied){
+      if(el){ el.textContent = "圖片已複製 ✓"; setTimeout(()=>{ el.textContent = old; el.disabled = false; }, 1800); }
+      alert("圖片已複製，到 LINE 對話框直接貼上（Ctrl／⌘ + V）即可送出。");
+    } else {
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = `廠商週報_${g.vendorName}_${dateStr.replace(/\//g,"")}.png`;
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(()=>URL.revokeObjectURL(a.href), 4000);
+      if(el){ el.textContent = "已下載 ✓"; setTimeout(()=>{ el.textContent = old; el.disabled = false; }, 1800); }
+    }
+  }catch(e){
+    console.error(e);
+    alert("產生圖片失敗：" + (e.message || e));
+    if(el){ el.textContent = old; el.disabled = false; }
+  } finally {
+    if(box && box.parentNode) box.parentNode.removeChild(box);
+  }
 }
 
 function printVendorWeekly(vendorId){
@@ -3110,22 +3185,20 @@ function printVendorWeekly(vendorId){
       th, td{ border:1px solid #ccc; padding:5px 7px; text-align:left; vertical-align:top; }
       th{ background:#f4f7f9; } thead{ display:table-header-group; } tr{ page-break-inside:avoid; }
       tr[data-urgent="1"] td:first-child{ border-left:4px solid #C13F3F; }
-      .sub{ color:#666; font-size:10.5px; margin-top:2px; } .stale{ color:#B42318; font-weight:700; } .nolog{ color:#999; }
-      @media print{ body{ padding:8px; } }
+      .sub{ color:#666; font-size:10.5px; margin-top:2px; } @media print{ body{ padding:8px; } }
     </style></head><body>
     ${groups.map(g=>`
     <section>
       <h1>${esc(g.vendorName)}　維修案件清單</h1>
       <div class="meta">台灣珍有福　列印時間：${now}　共 ${g.items.length} 筆（不含已結案／取消）</div>
       <table>
-        <thead><tr><th style="width:108px;">案件編號</th><th style="width:78px;">門市</th><th style="width:140px;">設備／類別</th><th style="width:56px;">緊急</th><th style="width:80px;">目前狀態</th><th style="width:52px;">報修</th><th>最新進度</th></tr></thead>
+        <thead><tr><th style="width:108px;">案件編號</th><th style="width:78px;">門市</th><th style="width:140px;">設備／類別</th><th style="width:56px;">緊急</th><th style="width:90px;">目前狀態</th><th style="width:60px;">報修</th></tr></thead>
         <tbody>
         ${g.items.map(it=>`
           <tr data-urgent="${it.urgency==='urgent'?1:0}">
             <td>#${esc(it.case_no)}</td><td>${esc(it.store)}</td>
             <td>${esc(it.item)}${it.reason ? `<div class="sub">${esc(weeklyCut(it.reason, 40))}</div>` : ''}</td>
             <td>${URGENCY_LABEL[it.urgency]||''}</td><td>${STATUS_LABEL[it.status]||it.status}</td><td>${weeklyMd(it.created)}</td>
-            <td>${it.logDate ? `<div><b>${weeklyMd(it.logDate)}</b>${it.days>=7 ? ` <span class="stale">（${it.days} 天無進度）</span>` : ''}</div><div>${esc(weeklyCut(it.logNote, 70)) || '<span class="nolog">（無說明）</span>'}</div>` : '<span class="nolog">尚無紀錄</span>'}</td>
           </tr>`).join("")}
         </tbody>
       </table>
@@ -3152,7 +3225,7 @@ function renderVendorWeekly(){
         <button class="btn btn-primary btn-sm" data-action="weekly-print-all">🖨 全部列印</button>
       </div>
     </div>
-    <div class="sub" style="margin-top:8px;">按「複製 LINE 文字」後，到該廠商的 LINE 貼上送出即可。內容不含費用與報價。只包含已指派廠商、且尚未結案／取消的案件。</div>
+    <div class="sub" style="margin-top:8px;">按「複製 LINE 文字」後，到該廠商的 LINE 貼上送出即可。內容不含費用、報價、最新進度與廠商更換紀錄（畫面上的「最新進度」只給你自己看）。只包含已指派廠商、且尚未結案／取消的案件。</div>
     ${w.error ? `<div class="error-msg">載入失敗：${esc(w.error)}</div>` : ""}
   </div>
   ${(!w.loading && !w.error && w.groups.length === 0) ? `<div class="empty">目前沒有已指派廠商的未結案件</div>` : ""}
@@ -3162,6 +3235,7 @@ function renderVendorWeekly(){
       <div><b>${esc(g.vendorName)}</b>　<span class="sub">${g.items.length} 筆${g.contact ? `　聯絡人：${esc(g.contact)}` : ""}${g.line ? `　LINE：${esc(g.line)}` : ""}</span></div>
       <div style="display:flex; gap:8px;">
         <button class="btn btn-primary btn-sm" data-action="weekly-copy" data-id="${g.vendorId}">📋 複製 LINE 文字</button>
+        <button class="btn btn-primary btn-sm" data-action="weekly-image" data-id="${g.vendorId}">🖼 產生圖片</button>
         <button class="btn btn-outline btn-sm" data-action="weekly-print" data-id="${g.vendorId}">🖨 列印</button>
       </div>
     </div>
