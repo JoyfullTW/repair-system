@@ -163,7 +163,7 @@
 </head>
 <body>
 <div id="app"></div>
-<div class="version-badge">admin build 69</div>
+<div class="version-badge">admin build 70</div>
 
 <script>
 function esc(t){ return String(t==null?'':t).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;"); }
@@ -270,7 +270,7 @@ let state = {
   currentAsset: null, assetFormError: "", assetLogs: [], assetAttachments: [],
   assignmentRules: [], assignmentFilters: { storeId:"", confirmStatus:"" }, assignmentFormError: "", showCopyRulesPanel: false,
   contacts: [], editingStoreId: null, editingContactId: null, generalCategories: [], otherCategoryStats: [], editingVendorId: null, vendorFilterQ: "",
-  infraFilters: { storeId: "" }, infraRecords: [], infraPhotos: {}, sidebarBadges: { newCases: 0, pendingAccounts: 0, overdueCases: 0, overdueMaintenance: 0 },
+  infraFilters: { storeId: "" }, infraRecords: [], infraPhotos: {}, sidebarBadges: { newCases: 0, pendingAccounts: 0, overdueCases: 0, overdueMaintenance: 0, overdueMemos: 0 },
   overdueDays: 2,
   storageLimitMb: 1024, storageStats: null,
   manuals: [], manualFilterQ: "", manualFormError: "",
@@ -284,6 +284,7 @@ let state = {
   maintenanceRows: [], maintenanceFilters: { storeId:"", category:"", dueOnly:false }, maintenanceFormError: "",
   showMaintenanceForm: false, maintenanceBatchStoreIds: [],
   vendorWeekly: { groups: [], loadedAt: null, loading: false, error: "", hideNoPending: true },
+  approvalMemos: [], approvalFilters: { q:"", type:"", openOnly:true, overdueOnly:false }, showMemoForm:false, editingMemoId:null, memoFormError:"", memoDraft:null, memoLogs:{}, memoLogsOpen:null, caseMemos:[],
   relatedParentCase: null, relatedChildCases: [], showDeriveCaseForm: false,
 };
 
@@ -364,6 +365,7 @@ function renderSidebar(){
     { key:"vendor-weekly", label:"廠商週報", ico:"📨" },
     { key:"assignment-rules", label:"廠商指派規則", ico:"🗂️" },
     { key:"maintenance", label:"定期保養", ico:"🛠️", badge: badges.overdueMaintenance },
+    { key:"approvals", label:"簽呈追蹤", ico:"📝", badge: badges.overdueMemos },
   ];
   return `
   <div class="sidebar">
@@ -383,7 +385,7 @@ function renderSidebar(){
 }
 
 function renderTopbar(){
-  const titles = { dashboard:"Dashboard", "case-list":"案件列表", "case-detail":"案件詳情", assets:"資產管理", "asset-detail":"資產詳情", stores:"門市管理", contacts:"通訊錄", infrastructure:"門市基礎設施", manuals:"設備說明書", accounts:"帳號管理", vendors:"廠商管理", "vendor-weekly":"廠商週報", "assignment-rules":"廠商指派規則", maintenance:"定期保養" };
+  const titles = { dashboard:"Dashboard", "case-list":"案件列表", "case-detail":"案件詳情", assets:"資產管理", "asset-detail":"資產詳情", stores:"門市管理", contacts:"通訊錄", infrastructure:"門市基礎設施", manuals:"設備說明書", accounts:"帳號管理", vendors:"廠商管理", "vendor-weekly":"廠商週報", "assignment-rules":"廠商指派規則", maintenance:"定期保養", approvals:"簽呈追蹤" };
   const showBack = state.view === "case-detail" || state.view === "asset-detail";
   return `
   <div class="topbar">
@@ -407,6 +409,7 @@ function renderViewBody(){
   if(state.view === "vendor-weekly") return renderVendorWeekly();
   if(state.view === "assignment-rules") return renderAssignmentRules();
   if(state.view === "maintenance") return renderMaintenance();
+  if(state.view === "approvals") return renderApprovalMemos();
   return "";
 }
 
@@ -435,6 +438,15 @@ function renderDashboard(){
       <div style="font-size:12px; color:var(--ink-soft); margin-top:2px;">點這裡查看是哪些門市、哪個設備需要安排保養</div>
     </div>
     <div style="font-size:20px; color:#B42318;">›</div>
+  </div>` : ""}
+  ${(state.sidebarBadges?.overdueMemos||0) > 0 ? `
+  <div class="card stat-card" data-action="nav-memo-overdue"
+       style="cursor:pointer; margin-bottom:16px; display:flex; align-items:center; justify-content:space-between; background:#FBF0DD; border-color:var(--warn,#B8860B);">
+    <div>
+      <div style="font-weight:700; font-size:14px;">📝 有 ${state.sidebarBadges.overdueMemos} 張簽呈停留太久，該去問進度了</div>
+      <div style="font-size:12px; color:var(--ink-soft); margin-top:2px;">點這裡查看卡在哪一關（協理／群組沒小圖示／台北・日本跑簽中）</div>
+    </div>
+    <div style="font-size:20px;">›</div>
   </div>` : ""}
   ${st.storeReply > 0 ? `
   <div class="card stat-card" data-action="nav" data-view="case-list" data-quick="store_reply" data-tone="warn"
@@ -772,6 +784,7 @@ function renderCaseDetail(){
           <option value="small" ${c.approval_type==='small'?'selected':''}>小簽呈（3萬以內）</option>
           <option value="large" ${c.approval_type==='large'?'selected':''}>大簽呈（3萬以上，送日本）</option>
         </select>
+        <div id="case-memos-panel">${renderCaseMemosInner()}</div>
         ${["general_affairs_supervisor","admin"].includes(state.profile?.role) ? `
         <div class="checkbox-row"><input type="checkbox" id="edit-manager-approved" ${c.manager_approved?'checked':''}><label for="edit-manager-approved">已獲協理同意</label></div>
         <label class="field-label">同意備註</label>
@@ -1714,6 +1727,42 @@ async function onAction(e){
   else if(action === "copy-assets-from-template"){ await copyAssetsFromTemplate(); }
   else if(action === "toggle-copy-rules-panel"){ state.showCopyRulesPanel = !state.showCopyRulesPanel; render(); }
   else if(action === "copy-rules-from-template"){ await copyRulesFromTemplate(); }
+  else if(action === "nav-memo-overdue"){
+    state.approvalFilters = { q:"", type:"", openOnly:true, overdueOnly:true };
+    await goTo("approvals");
+  }
+  else if(action === "new-memo"){ state.showMemoForm = true; state.editingMemoId = null; state.memoFormError = ""; render(); }
+  else if(action === "new-memo-from-case"){
+    const c = state.currentCase;
+    state.memoDraft = { case_no: c?.case_no || "", approval_type: c?.approval_type || "small" };
+    state.showMemoForm = true; state.editingMemoId = null; state.memoFormError = "";
+    await goTo("approvals");
+  }
+  else if(action === "edit-memo"){ state.editingMemoId = el.dataset.id; state.showMemoForm = false; state.memoFormError = ""; render(); window.scrollTo(0,0); }
+  else if(action === "cancel-memo-form"){ state.showMemoForm = false; state.editingMemoId = null; state.memoFormError = ""; state.memoDraft = null; render(); }
+  else if(action === "save-memo"){ await saveMemo(); }
+  else if(action === "advance-memo"){
+    const m = state.approvalMemos.find(x=>x.id===el.dataset.id);
+    if(m) await changeMemoStage(m.id, memoNextStage(m.stage));
+  }
+  else if(action === "return-memo"){
+    const reason = prompt("退回原因（選填，例如：財務要求補第二家報價）：");
+    if(reason !== null) await changeMemoStage(el.dataset.id, "returned", reason.trim() || "被退回修改");
+  }
+  else if(action === "toggle-memo-logs"){
+    const id = el.dataset.id;
+    if(state.memoLogsOpen === id){ state.memoLogsOpen = null; render(); }
+    else { state.memoLogsOpen = id; state.memoLogs[id] = []; render(); loadMemoLogs(id); }
+  }
+  else if(action === "apply-memo-filters"){
+    state.approvalFilters = {
+      q: document.getElementById("memo-filter-q")?.value.trim() || "",
+      type: document.getElementById("memo-filter-type")?.value || "",
+      openOnly: !!document.getElementById("memo-filter-open")?.checked,
+      overdueOnly: !!document.getElementById("memo-filter-overdue")?.checked,
+    };
+    render();
+  }
   else if(action === "nav-maintenance-due"){
     state.maintenanceFilters = { storeId:"", category:"", dueOnly:true };
     await goTo("maintenance");
@@ -1836,6 +1885,8 @@ async function loadSidebarBadgeCounts(){
       .select("id", { count:"exact", head:true })
       .lt("next_suggested_date", new Date().toISOString().slice(0,10));
     state.sidebarBadges.overdueMaintenance = overdueMaintenance || 0;
+
+    state.sidebarBadges.overdueMemos = await countOverdueMemos();
   }catch(e){ /* 提醒數字載入失敗不影響其他功能 */ }
   render();
 }
@@ -2512,6 +2563,309 @@ async function loadAccounts(){
 /* ============================================================
    導覽
    ============================================================ */
+/* ============================================================
+   簽呈追蹤（小簽呈／大簽呈送日本）
+   流程：已送協理 → 協理已簽、已傳群組 → 台北已接收（群組檔案上有小圖示）、跑簽中
+        → 核准完成、已回傳 → 已發包；途中可能「退回修改」或「取消」
+   系統無法自動得知台北／日本的進度，靠「停留太久就提醒」讓總務主動去問
+   ============================================================ */
+const MEMO_STAGES = ["to_manager","sent_group","taipei_processing","approved","contracted"];
+const MEMO_STAGE_LABEL = {
+  to_manager:"已送協理", sent_group:"協理已簽、已傳群組", taipei_processing:"台北已接收、跑簽中",
+  approved:"核准完成、已回傳", contracted:"已發包", returned:"退回修改", cancelled:"取消"
+};
+// 按「下一步」時按鈕上的文字（＝要切換到的下一個關卡）
+const MEMO_NEXT_BUTTON = {
+  to_manager:"✔ 協理已簽、已傳群組", sent_group:"✔ 台北已貼圖示（已接收）",
+  taipei_processing:"✔ 已核准、已回傳群組", approved:"✔ 已發包", returned:"✔ 修改後重新送協理"
+};
+const MEMO_TYPE_LABEL = { small:"小簽呈", large:"大簽呈（送日本）" };
+const MEMO_OPEN_STAGES = ["to_manager","sent_group","taipei_processing","approved","returned"];
+
+/* 提醒門檻：可依實際情況調整 */
+const MEMO_OVERDUE_RULE = {
+  to_manager:        { days:2,  unit:"day",     hint:"協理還沒簽，記得提醒協理" },
+  sent_group:        { days:1,  unit:"workday", hint:"群組檔案還沒有小圖示，台北可能沒看到，記得在群組確認" },
+  taipei_processing: { small:7, large:14, unit:"day", hint:"在台北／日本跑簽太久，記得在群組問目前在哪一關" },
+  returned:          { days:2,  unit:"day",     hint:"被退回後還沒重新送出" },
+};
+
+function memoNextStage(stage){
+  if(stage === "returned") return "to_manager";
+  const i = MEMO_STAGES.indexOf(stage);
+  return (i >= 0 && i < MEMO_STAGES.length-1) ? MEMO_STAGES[i+1] : null;
+}
+function memoCalendarDaysSince(iso){
+  if(!iso) return 0;
+  const start = new Date(iso); start.setHours(0,0,0,0);
+  const today = new Date(); today.setHours(0,0,0,0);
+  return Math.max(0, Math.round((today - start) / 86400000));
+}
+function memoWorkdaysSince(iso){
+  if(!iso) return 0;
+  const d = new Date(iso); d.setHours(0,0,0,0);
+  const today = new Date(); today.setHours(0,0,0,0);
+  let n = 0;
+  while(d < today){
+    d.setDate(d.getDate() + 1);
+    const w = d.getDay();
+    if(w !== 0 && w !== 6) n++;
+  }
+  return n;
+}
+// 回傳 { overdue, label, hint }
+function memoOverdueInfo(m){
+  const rule = MEMO_OVERDUE_RULE[m.stage];
+  if(!rule) return { overdue:false, label:"", hint:"" };
+  const limit = rule.days != null ? rule.days : rule[m.approval_type];
+  if(rule.unit === "workday"){
+    const n = memoWorkdaysSince(m.stage_changed_at);
+    return { overdue: n > limit, label:`已 ${n} 個工作天`, hint: rule.hint };
+  }
+  const n = memoCalendarDaysSince(m.stage_changed_at);
+  return { overdue: n > limit, label:`已 ${n} 天`, hint: rule.hint };
+}
+function memoLimitText(m){
+  const rule = MEMO_OVERDUE_RULE[m.stage];
+  if(!rule) return "";
+  const limit = rule.days != null ? rule.days : rule[m.approval_type];
+  return `超過 ${limit} ${rule.unit==="workday"?"個工作天":"天"}提醒`;
+}
+function memoStagePill(stage){
+  const tone = {
+    to_manager:"background:#E4EAF0; color:#1B2A41;", sent_group:"background:#E0EEF5; color:#1F5670;",
+    taipei_processing:"background:#E0EEF5; color:#1F5670;", approved:"background:#FEF3C7; color:#946200;",
+    contracted:"background:#DCFCE7; color:#166534;", returned:"background:#FEE4E2; color:#B42318;",
+    cancelled:"background:#EEE; color:#888;"
+  }[stage] || "";
+  return `<span class="status-pill" style="${tone}">${MEMO_STAGE_LABEL[stage]||stage}</span>`;
+}
+
+async function loadApprovalMemos(){
+  const { data, error } = await sb.from("approval_memos")
+    .select("*, cases(case_no, status), vendors(name)")
+    .order("created_at", { ascending:false });
+  if(error){ alert("簽呈載入失敗：" + error.message); state.approvalMemos = []; return; }
+  state.approvalMemos = (data||[]).map(m=>({ ...m, case_no: m.cases?.case_no || "", case_status: m.cases?.status || "", vendor_name: m.vendors?.name || "" }));
+}
+async function loadMemoLogs(memoId){
+  const { data } = await sb.from("approval_memo_logs").select("*").eq("memo_id", memoId).order("created_at");
+  state.memoLogs[memoId] = data || [];
+  render();
+}
+async function countOverdueMemos(){
+  const { data } = await sb.from("approval_memos").select("stage, approval_type, stage_changed_at").in("stage", MEMO_OPEN_STAGES);
+  return (data||[]).filter(m=> memoOverdueInfo(m).overdue).length;
+}
+
+function renderApprovalMemos(){
+  const f = state.approvalFilters;
+  let rows = state.approvalMemos || [];
+  if(f.openOnly) rows = rows.filter(m=> MEMO_OPEN_STAGES.includes(m.stage));
+  if(f.type) rows = rows.filter(m=> m.approval_type === f.type);
+  if(f.overdueOnly) rows = rows.filter(m=> memoOverdueInfo(m).overdue);
+  if(f.q){
+    const q = f.q.toLowerCase();
+    rows = rows.filter(m=> [m.memo_no, m.subject, m.case_no, m.vendor_name, m.note].some(x=> (x||"").toLowerCase().includes(q)));
+  }
+  // 逾期的排最前面，其次依進入目前關卡的時間（越久越前面）
+  rows = [...rows].sort((a,b)=>{
+    const oa = memoOverdueInfo(a).overdue ? 0 : 1, ob = memoOverdueInfo(b).overdue ? 0 : 1;
+    if(oa !== ob) return oa - ob;
+    return new Date(a.stage_changed_at) - new Date(b.stage_changed_at);
+  });
+  const all = state.approvalMemos || [];
+  const overdueN = all.filter(m=> MEMO_OPEN_STAGES.includes(m.stage) && memoOverdueInfo(m).overdue).length;
+  const toContractN = all.filter(m=> m.stage === "approved").length;
+  const editing = state.editingMemoId ? all.find(m=>m.id===state.editingMemoId) : null;
+  const vendorOptions = (sel)=> `<option value="">（未定）</option>` + state.vendors.map(v=>`<option value="${v.id}" ${v.id===sel?'selected':''}>${esc(v.name)}</option>`).join("");
+
+  const form = (state.showMemoForm || editing) ? (()=>{
+    const m = editing || { approval_type: state.memoDraft?.approval_type || "small", case_no: state.memoDraft?.case_no || "", stage:"to_manager", submitted_date: new Date().toISOString().slice(0,10) };
+    return `
+    <div class="card" style="border-color:var(--primary); margin-bottom:14px;">
+      <div class="section-title" style="margin-top:0;">${editing ? '編輯簽呈' : '新增簽呈追蹤'}</div>
+      <div class="grid grid-4">
+        <div><label class="field-label">簽呈編號</label><input type="text" id="memo-no" value="${esc(m.memo_no)||''}" placeholder="例如：2026111701"></div>
+        <div style="grid-column: span 2;"><label class="field-label">主旨 *</label><input type="text" id="memo-subject" value="${esc(m.subject)||''}" placeholder="例如：中央廚房建置實驗室乙案"></div>
+        <div><label class="field-label">類型 *</label>
+          <select id="memo-type">
+            <option value="small" ${m.approval_type==='small'?'selected':''}>小簽呈（3萬以內）</option>
+            <option value="large" ${m.approval_type==='large'?'selected':''}>大簽呈（3萬以上，送日本）</option>
+          </select></div>
+        <div><label class="field-label">含稅金額</label><input type="number" id="memo-amount" value="${m.amount??''}"></div>
+        <div><label class="field-label">送出日期</label><input type="date" id="memo-submitted" value="${m.submitted_date||''}"></div>
+        <div><label class="field-label">關聯報修案件編號（選填）</label><input type="text" id="memo-case-no" value="${esc(m.case_no)||''}" placeholder="例如：999-261020-001"></div>
+        <div><label class="field-label">預定發包廠商（選填）</label><select id="memo-vendor">${vendorOptions(m.vendor_id)}</select></div>
+        ${editing ? `
+        <div><label class="field-label">目前關卡</label>
+          <select id="memo-stage">${[...MEMO_STAGES,"returned","cancelled"].map(s=>`<option value="${s}" ${m.stage===s?'selected':''}>${MEMO_STAGE_LABEL[s]}</option>`).join("")}</select></div>` : ""}
+        <div style="grid-column: span ${editing?3:4};"><label class="field-label">備註</label><input type="text" id="memo-note" value="${esc(m.note)||''}" placeholder="例如：含設備器具、隔間、水電三項"></div>
+      </div>
+      ${state.memoFormError ? `<div class="error-msg">${state.memoFormError}</div>` : ""}
+      <div style="margin-top:12px; display:flex; gap:8px;">
+        <button class="btn btn-primary btn-sm" data-action="save-memo">${editing ? '儲存' : '建立'}</button>
+        <button class="btn btn-outline btn-sm" data-action="cancel-memo-form">取消</button>
+      </div>
+    </div>`;
+  })() : "";
+
+  return `
+  ${overdueN > 0 ? `
+  <div class="card" style="margin-bottom:14px; background:#FBF0DD; border-color:var(--warn);">
+    <div style="font-weight:700; font-size:14px;">⚠️ 有 ${overdueN} 張簽呈停留太久，該去問進度了</div>
+    <div style="font-size:12px; color:var(--ink-soft); margin-top:2px;">提醒門檻：送協理超過 2 天／傳群組後超過 1 個工作天沒有小圖示／小簽呈跑簽超過 7 天、大簽呈超過 14 天／退回後超過 2 天未重送</div>
+  </div>` : ""}
+  ${toContractN > 0 ? `
+  <div class="card" style="margin-bottom:14px; background:#FEF3C7; border-color:#946200;">
+    <div style="font-weight:700; font-size:14px; color:#7A4E00;">📌 有 ${toContractN} 張簽呈已核准、等你發包</div>
+  </div>` : ""}
+  <div class="filter-bar">
+    <input type="text" id="memo-filter-q" placeholder="搜尋編號／主旨／案件／廠商" value="${esc(f.q)}">
+    <select id="memo-filter-type"><option value="">全部類型</option><option value="small" ${f.type==='small'?'selected':''}>小簽呈</option><option value="large" ${f.type==='large'?'selected':''}>大簽呈</option></select>
+    <label style="display:flex; align-items:center; gap:6px; font-size:13px; color:var(--ink-soft);"><input type="checkbox" id="memo-filter-open" ${f.openOnly?'checked':''}> 只看進行中</label>
+    <label style="display:flex; align-items:center; gap:6px; font-size:13px; color:var(--ink-soft);"><input type="checkbox" id="memo-filter-overdue" ${f.overdueOnly?'checked':''}> 只看該追蹤的</label>
+    <button class="btn btn-outline btn-sm" data-action="apply-memo-filters">套用篩選</button>
+    ${(!state.showMemoForm && !editing) ? `<button class="btn btn-primary btn-sm" data-action="new-memo">➕ 新增簽呈</button>` : ""}
+  </div>
+  ${form}
+  <div class="card" style="padding:0; overflow-x:auto;">
+    <table>
+      <thead><tr><th>編號／主旨</th><th>類型</th><th style="text-align:right;">含稅金額</th><th>關聯案件</th><th>目前關卡</th><th>停留</th><th>下一步</th><th></th></tr></thead>
+      <tbody>
+      ${rows.length===0 ? `<tr><td colspan="8" style="text-align:center; color:var(--ink-soft); padding:30px;">${(state.approvalMemos||[]).length ? '沒有符合條件的簽呈' : '尚未登記任何簽呈，按「➕ 新增簽呈」開始追蹤'}</td></tr>` : rows.map(m=>{
+        const od = memoOverdueInfo(m);
+        const next = memoNextStage(m.stage);
+        const logsOpen = state.memoLogsOpen === m.id;
+        return `
+        <tr style="${od.overdue ? 'background:#FFF7E6;' : ''}">
+          <td style="min-width:220px;">
+            <div class="mono" style="font-size:11px; color:var(--ink-soft);">${m.memo_no ? 'JF(採)字第 '+esc(m.memo_no)+' 號' : '（未編號）'}</div>
+            <div style="font-weight:700;">${esc(m.subject)}</div>
+            ${m.vendor_name ? `<div style="font-size:12px; color:var(--ink-soft);">發包廠商：${esc(m.vendor_name)}</div>` : ""}
+            ${m.note ? `<div style="font-size:12px; color:var(--ink-soft);">${esc(m.note)}</div>` : ""}
+          </td>
+          <td style="white-space:nowrap;">${m.approval_type==='large' ? '<b>大簽呈</b>' : '小簽呈'}</td>
+          <td class="mono" style="text-align:right; white-space:nowrap;">${m.amount!=null ? '$'+Number(m.amount).toLocaleString() : '—'}</td>
+          <td style="white-space:nowrap;">${m.case_id ? `<span class="mono" style="color:var(--primary); cursor:pointer; text-decoration:underline;" data-action="open-case" data-id="${m.case_id}">#${esc(m.case_no)}</span>` : '—'}</td>
+          <td style="white-space:nowrap;">${memoStagePill(m.stage)}</td>
+          <td style="white-space:nowrap; font-size:12px;">
+            ${MEMO_OVERDUE_RULE[m.stage] ? `${od.overdue ? `<b style="color:#B42318;">⚠️ ${od.label}</b><div style="color:#B42318; max-width:200px; white-space:normal;">${od.hint}</div>` : `<span style="color:var(--ink-soft);">${od.label}</span><div style="color:var(--ink-soft);">${memoLimitText(m)}</div>`}` : `<span style="color:var(--ink-soft);">${(m.stage_changed_at||'').slice(0,10)}</span>`}
+          </td>
+          <td style="white-space:nowrap;">
+            ${next ? `<button class="btn btn-primary btn-sm" data-action="advance-memo" data-id="${m.id}">${MEMO_NEXT_BUTTON[m.stage]}</button>` : ""}
+            ${["sent_group","taipei_processing"].includes(m.stage) ? `<button class="btn btn-outline btn-sm" data-action="return-memo" data-id="${m.id}">退回</button>` : ""}
+          </td>
+          <td style="white-space:nowrap;">
+            <button class="btn btn-outline btn-sm" data-action="edit-memo" data-id="${m.id}">編輯</button>
+            <button class="btn btn-outline btn-sm" data-action="toggle-memo-logs" data-id="${m.id}">${logsOpen ? '收起' : '歷程'}</button>
+          </td>
+        </tr>
+        ${logsOpen ? `
+        <tr><td colspan="8" style="background:var(--bg); font-size:12px;">
+          ${(state.memoLogs[m.id]||[]).length === 0 ? '載入中…' : (state.memoLogs[m.id]||[]).map(l=>`
+            <div style="padding:3px 0;"><span class="mono" style="color:var(--ink-soft);">${new Date(l.created_at).toLocaleString('zh-TW',{hour12:false})}</span>　${l.from_stage ? (MEMO_STAGE_LABEL[l.from_stage]||l.from_stage)+' → ' : ''}<b>${MEMO_STAGE_LABEL[l.to_stage]||l.to_stage||''}</b>${l.note ? '　'+esc(l.note) : ''}</div>`).join("")}
+        </td></tr>` : ""}`;
+      }).join("")}
+      </tbody>
+    </table>
+  </div>`;
+}
+
+async function saveMemo(){
+  const subject = document.getElementById("memo-subject").value.trim();
+  if(!subject){ state.memoFormError = "請填寫主旨"; render(); return; }
+  const caseNo = document.getElementById("memo-case-no").value.trim().replace(/^#/, "");
+  let caseId = null;
+  if(caseNo){
+    const { data: c } = await sb.from("cases").select("id").eq("case_no", caseNo).maybeSingle();
+    if(!c){ state.memoFormError = `找不到案件編號「${caseNo}」，請確認或先留空`; render(); return; }
+    caseId = c.id;
+  }
+  const amountRaw = document.getElementById("memo-amount").value;
+  const payload = {
+    memo_no: document.getElementById("memo-no").value.trim() || null,
+    subject,
+    approval_type: document.getElementById("memo-type").value,
+    amount: amountRaw === "" ? null : Number(amountRaw),
+    submitted_date: document.getElementById("memo-submitted").value || null,
+    case_id: caseId,
+    vendor_id: document.getElementById("memo-vendor").value || null,
+    note: document.getElementById("memo-note").value.trim() || null,
+    updated_at: new Date().toISOString(),
+  };
+  const editing = state.editingMemoId ? state.approvalMemos.find(m=>m.id===state.editingMemoId) : null;
+  if(editing){
+    const newStage = document.getElementById("memo-stage").value;
+    if(newStage !== editing.stage){ payload.stage = newStage; payload.stage_changed_at = new Date().toISOString(); }
+    const { error } = await sb.from("approval_memos").update(payload).eq("id", editing.id);
+    if(error){ state.memoFormError = "儲存失敗：" + (error.message.includes("approval_memos_memo_no_uq") ? "簽呈編號重複" : error.message); render(); return; }
+    if(payload.stage){
+      await sb.from("approval_memo_logs").insert({ memo_id: editing.id, from_stage: editing.stage, to_stage: newStage, note:"手動調整關卡", created_by: state.profile.id });
+    }
+  } else {
+    payload.stage = "to_manager";
+    payload.stage_changed_at = new Date().toISOString();
+    payload.created_by = state.profile.id;
+    const { data, error } = await sb.from("approval_memos").insert(payload).select("id").single();
+    if(error){ state.memoFormError = "建立失敗：" + (error.message.includes("approval_memos_memo_no_uq") ? "簽呈編號重複" : error.message); render(); return; }
+    await sb.from("approval_memo_logs").insert({ memo_id: data.id, from_stage: null, to_stage: "to_manager", note:"建立簽呈追蹤", created_by: state.profile.id });
+    // 有關聯案件：順手把案件的「需走簽呈／簽呈類型」打勾，並記錄到案件歷程
+    if(caseId){
+      await sb.from("cases").update({ needs_approval:true, approval_type: payload.approval_type, updated_at: new Date().toISOString() }).eq("id", caseId);
+      await sb.from("case_logs").insert({ case_id: caseId, action_type:"status_change", note:`已送出${MEMO_TYPE_LABEL[payload.approval_type]}「${subject}」${payload.memo_no ? '（'+payload.memo_no+'）' : ''}，簽呈進度請看「簽呈追蹤」`, created_by: state.profile.id });
+    }
+  }
+  state.showMemoForm = false; state.editingMemoId = null; state.memoFormError = ""; state.memoDraft = null;
+  await loadApprovalMemos();
+  await loadSidebarBadgeCounts();
+}
+
+async function changeMemoStage(id, toStage, note){
+  const m = state.approvalMemos.find(x=>x.id===id);
+  if(!m || !toStage) return;
+  const now = new Date().toISOString();
+  const { error } = await sb.from("approval_memos").update({ stage: toStage, stage_changed_at: now, updated_at: now }).eq("id", id);
+  if(error){ alert("更新失敗：" + error.message); return; }
+  await sb.from("approval_memo_logs").insert({ memo_id: id, from_stage: m.stage, to_stage: toStage, note: note || null, created_by: state.profile.id });
+  if(m.case_id){
+    await sb.from("case_logs").insert({ case_id: m.case_id, action_type:"status_change", note:`簽呈「${m.subject}」進度：${MEMO_STAGE_LABEL[toStage]}${note ? '（'+note+'）' : ''}`, created_by: state.profile.id });
+  }
+  // 已核准、已回傳：如果關聯案件還在「等待核准」，問要不要直接改成「已安排／維修中」
+  if(toStage === "approved" && m.case_id && m.case_status === "pending_approval"){
+    if(confirm(`簽呈已核准。\n要把關聯案件 #${m.case_no} 的狀態從「等待核准」改成「已安排／維修中」嗎？\n（之後發包、約好到場日再到案件裡補日期）`)){
+      await sb.from("cases").update({ status:"in_repair", manager_approved:true, updated_at: now }).eq("id", m.case_id);
+      await sb.from("case_logs").insert({ case_id: m.case_id, action_type:"status_change", from_status:"pending_approval", to_status:"in_repair", note:`簽呈「${m.subject}」已核准，狀態更新為「已安排／維修中」`, created_by: state.profile.id });
+    }
+  }
+  if(state.memoLogsOpen === id) state.memoLogs[id] = [];
+  await loadApprovalMemos();
+  if(state.memoLogsOpen === id) loadMemoLogs(id);
+  await loadSidebarBadgeCounts();
+}
+
+function renderCaseMemosInner(){
+  const list = state.caseMemos || [];
+  return `
+  <div style="margin-top:10px; padding-top:10px; border-top:1px dashed var(--border);">
+    <div style="font-size:12px; font-weight:700; color:var(--ink-soft); margin-bottom:6px;">📝 簽呈進度</div>
+    ${list.length === 0 ? `<div style="font-size:12px; color:var(--ink-soft);">尚未登記簽呈</div>` : list.map(m=>{
+      const od = memoOverdueInfo(m);
+      return `<div style="font-size:13px; margin-bottom:4px;">${memoStagePill(m.stage)} ${esc(m.subject)}${m.memo_no ? ' <span class="mono" style="font-size:11px; color:var(--ink-soft);">'+esc(m.memo_no)+'</span>' : ''}${od.overdue ? ' <b style="color:#B42318; font-size:12px;">⚠️ '+od.label+'</b>' : ''}</div>`;
+    }).join("")}
+    <div style="margin-top:6px; display:flex; gap:6px;">
+      <button class="btn btn-outline btn-sm" data-action="new-memo-from-case">＋ 登記簽呈</button>
+      ${list.length ? `<button class="btn btn-outline btn-sm" data-action="nav" data-view="approvals">查看簽呈追蹤</button>` : ""}
+    </div>
+  </div>`;
+}
+async function loadCaseMemos(caseId){
+  const { data } = await sb.from("approval_memos").select("id, memo_no, subject, approval_type, stage, stage_changed_at").eq("case_id", caseId).order("created_at");
+  state.caseMemos = data || [];
+  const panel = document.getElementById("case-memos-panel");
+  if(panel && state.view === "case-detail") panel.innerHTML = renderCaseMemosInner(), panel.querySelectorAll("[data-action]").forEach(el=> el.addEventListener("click", onAction));
+}
+
 async function goTo(view){
   state.view = view;
   state.editingStoreId = null;
@@ -2530,6 +2884,7 @@ async function goTo(view){
   else if(view === "vendor-weekly"){ await loadVendors(); await loadVendorWeekly(); }
   else if(view === "assignment-rules") await loadVendors();
   else if(view === "maintenance"){ await loadStores(); await loadVendors(); await loadRegions(); await loadMaintenanceRows(); }
+  else if(view === "approvals"){ await loadVendors(); await loadApprovalMemos(); }
   await loadSidebarBadgeCounts();
   render();
 }
@@ -2543,6 +2898,7 @@ async function openCase(id){
   state.currentCase = { ...data, store_name: data.stores?.name || "", _storeReplyNew: !!data.store_reply_pending };
   state.showArchiveConfirm = false;
   state.caseLineBindings = null;
+  state.caseMemos = [];
   // 打開案件＝已讀：清掉「門市有新回報」旗標（只限總務以上；橫幅這次仍會顯示）
   if(data.store_reply_pending && ["general_affairs","general_affairs_supervisor","admin"].includes(state.profile?.role)){
     sb.from("cases").update({ store_reply_pending:false }).eq("id", id).then(()=>{});
@@ -2551,6 +2907,7 @@ async function openCase(id){
   render();
   loadCaseLogs(id);
   loadCaseAttachments(id);
+  loadCaseMemos(id);
   loadCaseVendorSuggestions(data);
   state.caseStoreContact = null;
   loadCaseStoreContact(data.store_id);
