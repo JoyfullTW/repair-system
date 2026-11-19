@@ -163,7 +163,7 @@
 </head>
 <body>
 <div id="app"></div>
-<div class="version-badge">admin build 70</div>
+<div class="version-badge">admin build 72</div>
 
 <script>
 function esc(t){ return String(t==null?'':t).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;"); }
@@ -233,6 +233,22 @@ const STATUS_GROUPS = [
 ];
 // 「已聯絡廠商之後」的逾期提醒範圍：沿用「處理中」分組，不含待受理（新案件/資料待補）與已結束案件
 const OVERDUE_ELIGIBLE_STATUSES = STATUS_GROUPS[1].options;
+/* 下次追蹤日：有手動設定就用手動；否則用「預計維修日期」（比最後更新還晚的話）；
+   都沒有就依緊急程度，從最後一次更新起算：緊急 1 天、影響營運 3 天、一般 7 天 */
+const FOLLOWUP_DAYS = { urgent:1, operational:3, normal:7 };
+function ymdLocal(d){ d = new Date(d); return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0"); }
+function addDaysYmd(ymd, n){ const d = new Date(ymd+"T00:00:00"); d.setDate(d.getDate()+n); return ymdLocal(d); }
+function mdText(ymd){ if(!ymd) return ""; const [y,m,d] = ymd.split("-"); return Number(m)+"/"+Number(d); }
+function caseFollowup(c){
+  const lastYmd = ymdLocal(c.updated_at || c.created_at || new Date());
+  if(c.next_followup_date) return { date:c.next_followup_date, source:"manual" };
+  if(c.scheduled_date && c.scheduled_date > lastYmd) return { date:c.scheduled_date, source:"scheduled" };
+  return { date: addDaysYmd(lastYmd, FOLLOWUP_DAYS[c.urgency] || 7), source:"auto" };
+}
+function isCaseFollowupDue(c){
+  return OVERDUE_ELIGIBLE_STATUSES.includes(c.status) && caseFollowup(c).date <= ymdLocal(new Date());
+}
+const FOLLOWUP_RULE_TEXT = "緊急 1 天、影響營運 3 天、一般 7 天沒更新，或已到你設定的下次追蹤日／預計維修日";
 const ROLE_LABEL = { store:"門市人員", general_affairs:"總務人員", general_affairs_supervisor:"總務主管", district_manager:"區經理", admin:"系統管理者" };
 const RULE_CATEGORIES = ["設備","清潔","裝修","廣告","弱電","消防","空調","POS"];
 function ruleCategoryOptions(selected){
@@ -427,7 +443,7 @@ function renderDashboard(){
     { key:"store_reply", label:"💬 門市有新回報", n:st.storeReply, tone:"warn" },
     { key:"urgent", label:"緊急案件", n:st.urgent, tone:"urgent" },
     { key:"repeat", label:"重複故障", n:st.repeat, tone:"urgent" },
-    { key:"overdue", label:"逾期未更新（廠商追蹤）", n:st.overdue, tone:"warn" },
+    { key:"overdue", label:"今天該追蹤", n:st.overdue, tone:"warn" },
   ];
   return `
   ${(state.sidebarBadges?.overdueMaintenance||0) > 0 ? `
@@ -457,12 +473,21 @@ function renderDashboard(){
     </div>
     <div style="font-size:20px; color:#B45A38;">›</div>
   </div>` : ""}
+  ${(st.helpCases||[]).length > 0 ? `
+  <div class="card" style="margin-bottom:16px; background:#EDE7F6; border-color:#5E35B1;">
+    <div style="font-weight:800; font-size:15px; color:#4527A0; margin-bottom:8px;">🙋 需要協理協助（${st.helpCases.length}）</div>
+    ${st.helpCases.map(c=>`
+      <div class="row-clickable" data-action="open-case" data-id="${c.id}" style="cursor:pointer; padding:8px 10px; background:#fff; border-radius:8px; margin-bottom:6px;">
+        <div style="font-size:13px;"><span class="mono" style="color:var(--ink-soft);">#${c.case_no}</span>　<b>${esc(c.stores?.name)||''}</b>　${esc(c.fault_category)||esc(c.general_category)||''}　<span style="font-size:12px; color:var(--ink-soft);">${STATUS_LABEL[c.status]||''}</span></div>
+        <div style="font-size:13px; color:#4527A0; margin-top:2px;">👉 ${esc(c.manager_help_note)||'（未填寫需要協助的內容）'}</div>
+      </div>`).join("")}
+  </div>` : ""}
   ${st.overdue > 0 ? `
   <div class="card stat-card" data-action="nav" data-view="case-list" data-quick="overdue" data-tone="warn"
        style="cursor:pointer; margin-bottom:16px; display:flex; align-items:center; justify-content:space-between; background:#FBF0DD; border-color:var(--warn,#B8860B);">
     <div>
-      <div style="font-weight:700; font-size:14px;">⚠️ 有 ${st.overdue} 筆案件已聯絡廠商後超過 ${state.overdueDays} 天沒有更新</div>
-      <div style="font-size:12px; color:var(--ink-soft); margin-top:2px;">點這裡查看清單，記得追蹤廠商進度</div>
+      <div style="font-weight:700; font-size:14px;">⚠️ 有 ${st.overdue} 筆案件今天該追蹤</div>
+      <div style="font-size:12px; color:var(--ink-soft); margin-top:2px;">${FOLLOWUP_RULE_TEXT}。點這裡查看清單</div>
     </div>
     <div style="font-size:20px;">›</div>
   </div>` : ""}
@@ -536,20 +561,21 @@ function renderCaseList(){
   </div>
   ${f.showArchived ? `<p style="font-size:12px; color:var(--err,#C13F3F); margin:-6px 0 12px; font-weight:700;">🗄 目前只顯示「已封存」的案件（一般人看不到這些），可進入案件詳情還原。</p>` :
     f.vendorId ? `<p style="font-size:12px; color:var(--accent,#2C6E8E); margin:-6px 0 12px; font-weight:700;">🧰 目前只顯示指派給「${(state.vendors.find(v=>v.id===f.vendorId)||{}).name||''}」的案件，跨所有門市。</p>` :
-    f.overdueOnly ? `<p style="font-size:12px; color:var(--warn,#B8860B); margin:-6px 0 12px; font-weight:700;">⚠️ 目前只顯示「已聯絡廠商後超過 ${state.overdueDays} 天未更新」的案件，套用篩選或搜尋會離開這個檢視。</p>` : (f.hideClosed && !f.status ? `<p style="font-size:12px; color:var(--ink-soft); margin:-6px 0 12px;">💡 已結案、已取消的案件預設不顯示，只列出還需要處理的。勾選上方選項可以看到全部。</p>` : "")}
+    f.overdueOnly ? `<p style="font-size:12px; color:var(--warn,#B8860B); margin:-6px 0 12px; font-weight:700;">⚠️ 目前只顯示「今天該追蹤」的案件（${FOLLOWUP_RULE_TEXT}），套用篩選或搜尋會離開這個檢視。</p>` : (f.hideClosed && !f.status ? `<p style="font-size:12px; color:var(--ink-soft); margin:-6px 0 12px;">💡 已結案、已取消的案件預設不顯示，只列出還需要處理的。勾選上方選項可以看到全部。</p>` : "")}
   <div class="card" style="padding:0; overflow-x:auto;">
     <table>
       <thead><tr>
-        <th>案件編號</th><th>門市</th><th>設備/類別</th><th>緊急</th><th>狀態</th><th>報告日期</th><th></th>
+        <th>案件編號</th><th>門市</th><th>設備/類別</th><th>緊急</th><th>狀態／廠商</th><th style="min-width:240px;">最新進度</th><th>報告日期</th><th></th>
       </tr></thead>
       <tbody>
-        ${rows.length===0 ? `<tr><td colspan="7" style="text-align:center; color:var(--ink-soft); padding:30px;">目前沒有符合條件的案件</td></tr>` : rows.map(c=>`
-          <tr class="row-clickable" data-action="open-case" data-id="${c.id}">
+        ${rows.length===0 ? `<tr><td colspan="8" style="text-align:center; color:var(--ink-soft); padding:30px;">目前沒有符合條件的案件</td></tr>` : rows.map(c=>`
+          <tr class="row-clickable" data-action="open-case" data-id="${c.id}"${c.needs_manager_help && !["closed","cancelled"].includes(c.status) ? ' style="background:#F3EEFB; box-shadow: inset 4px 0 0 #5E35B1;"' : ''}>
             <td class="case-no">#${c.case_no}</td>
             <td>${c.store_name||''}</td>
             <td>${esc(c.fault_category)||esc(c.general_category)||''}${c.repeat_fault?' <span class="repeat-badge">重複</span>':''}</td>
             <td><span class="status-pill" data-urgency="${c.urgency}">${URGENCY_LABEL[c.urgency]||''}</span></td>
-            <td><span class="status-pill"${(c.status==="repair_done" && c.store_reported_done_at)?' style="background:#B45A38; color:#fff;"':''}>${(c.status==="repair_done" && c.store_reported_done_at)?"🔔 門市回報 ":""}${STATUS_LABEL[c.status]||c.status}</span>${(c.store_reply_pending && !(c.status==="repair_done" && c.store_reported_done_at)) ? ' <span class="repeat-badge" style="background:#B45A38;">💬 門市回報</span>' : ''}${c.deleted_at ? ' <span class="repeat-badge" style="background:#C13F3F;">🗄 已封存</span>' : ''}</td>
+            <td><span class="status-pill"${(c.status==="repair_done" && c.store_reported_done_at)?' style="background:#B45A38; color:#fff;"':''}>${(c.status==="repair_done" && c.store_reported_done_at)?"🔔 門市回報 ":""}${STATUS_LABEL[c.status]||c.status}</span>${(c.store_reply_pending && !(c.status==="repair_done" && c.store_reported_done_at)) ? ' <span class="repeat-badge" style="background:#B45A38;">💬 門市回報</span>' : ''}${c.deleted_at ? ' <span class="repeat-badge" style="background:#C13F3F;">🗄 已封存</span>' : ''}${(()=>{ const v = state.vendors.find(v=>v.id===c.vendor_id); return v ? `<div style="font-size:12px; color:var(--ink-soft); margin-top:4px; max-width:160px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${esc(v.name)}">🧰 ${esc(v.name)}</div>` : ''; })()}</td>
+            <td>${renderLatestProgressCell(c)}</td>
             <td class="mono" style="font-size:12px; color:var(--ink-soft);">${c.report_date ? new Date(c.report_date+'T00:00:00').toLocaleDateString('zh-TW',{year:'numeric',month:'2-digit',day:'2-digit'}) : new Date(c.created_at).toLocaleDateString('zh-TW',{month:'2-digit',day:'2-digit'})}</td>
             <td>›</td>
           </tr>`).join("")}
@@ -580,9 +606,19 @@ function attachThumbInner(a){
 }
 
 function renderCaseAttachmentsInner(){
-  const attachCategories = Object.keys(ATTACH_CATEGORY_LABEL);
+  const allCategories = Object.keys(ATTACH_CATEGORY_LABEL);
   const attachByCategory = {};
-  attachCategories.forEach(cat=>attachByCategory[cat] = state.caseAttachments.filter(a=>a.category===cat));
+  allCategories.forEach(cat=>attachByCategory[cat] = state.caseAttachments.filter(a=>a.category===cat));
+  // 只列出「有檔案」的分類；上傳時再選分類，避免一次排出七個空白區塊
+  const attachCategories = allCategories.filter(cat=> attachByCategory[cat].length > 0);
+  const uploadBar = `
+    <div style="display:flex; gap:8px; align-items:center; margin-top:${attachCategories.length ? 14 : 0}px;">
+      <select id="attach-upload-category" style="flex:1;">
+        ${allCategories.map(cat=>`<option value="${cat}" ${cat==='receipt'?'selected':''}>${ATTACH_CATEGORY_LABEL[cat]}</option>`).join("")}
+      </select>
+      <button type="button" class="btn btn-primary btn-sm" data-action="upload-attachment-picked">＋ 上傳附件</button>
+    </div>
+    ${attachCategories.length ? '' : '<p style="font-size:12px; color:var(--ink-soft); margin:6px 0 0;">目前沒有附件</p>'}`;
   return attachCategories.map(cat=>`
     <p style="font-size:12px; font-weight:700; color:var(--ink-soft); margin:14px 0 6px;">${ATTACH_CATEGORY_LABEL[cat]}</p>
     <div class="attach-grid">
@@ -596,7 +632,7 @@ function renderCaseAttachmentsInner(){
             style="position:absolute; top:4px; right:4px; background:rgba(193,63,63,.9); color:#fff; border:none; border-radius:5px; width:22px; height:22px; line-height:1; cursor:pointer; font-size:13px;">✕</button>
         </div>`).join("")}
       <div class="attach-upload-btn" data-action="upload-attachment" data-category="${cat}">＋ 上傳</div>
-    </div>`).join("");
+    </div>`).join("") + uploadBar;
 }
 
 function renderCaseLineBlock(c){
@@ -743,9 +779,6 @@ function renderCaseDetail(){
           <option value="store_resolved" ${c.handling_method==='store_resolved'?'selected':''}>門市自行排除</option>
           <option value="purchase_new" ${c.handling_method==='purchase_new'?'selected':''}>不維修，直接採購新品</option>
         </select>
-        <label class="field-label">門市自付金額</label>
-        <input type="number" id="edit-store-pay" value="${c.store_pay_amount||''}">
-
         <label class="field-label">廠商${state.caseVendorAutoFilled ? ' <span style="color:var(--ok); text-transform:none; font-weight:400;">（系統已自動帶入建議廠商，請確認後按下方儲存）</span>' : (historyMatchList.length ? ' <span style="color:var(--ok); text-transform:none; font-weight:400;">（依這家店過去實際處理紀錄找到建議廠商）</span>' : (bestMatchList.length ? ' <span style="color:var(--ok); text-transform:none; font-weight:400;">（已依設備名稱找到最相關廠商，見選單最上方）</span>' : ''))}</label>
         <input type="text" id="vendor-search-filter" placeholder="🔍 輸入關鍵字篩選廠商…" style="margin-bottom:8px;">
         <div style="display:flex; gap:8px;">
@@ -757,19 +790,58 @@ function renderCaseDetail(){
         </p>
 
         <div class="grid grid-2">
-          <div><label class="field-label">報價金額</label><input type="number" id="edit-quote" value="${c.quote_amount||''}"></div>
-          <div><label class="field-label">最終費用</label><input type="number" id="edit-final" value="${c.final_amount||''}"></div>
-        </div>
-        <label class="field-label">更換零件</label>
-        <input type="text" id="edit-parts" value="${c.replaced_parts||''}" placeholder="例如：壓縮機、水管">
-        <div class="grid grid-2">
           <div><label class="field-label">預計維修日期</label><input type="date" id="edit-scheduled" value="${c.scheduled_date||''}"></div>
-          <div><label class="field-label">實際到場日期</label><input type="date" id="edit-arrival" value="${c.actual_arrival_date||''}"></div>
+          <div>
+            <label class="field-label">下次追蹤日</label>
+            <input type="date" id="edit-followup" value="${c.next_followup_date||''}">
+          </div>
         </div>
+        <div style="display:flex; flex-wrap:wrap; gap:6px; margin-top:6px; align-items:center;">
+          <span style="font-size:12px; color:var(--ink-soft);">快速設定：</span>
+          <button type="button" class="btn btn-outline btn-sm" data-action="set-followup" data-days="1">明天</button>
+          <button type="button" class="btn btn-outline btn-sm" data-action="set-followup" data-days="3">3 天後</button>
+          <button type="button" class="btn btn-outline btn-sm" data-action="set-followup" data-days="7">下週</button>
+          <button type="button" class="btn btn-outline btn-sm" data-action="set-followup" data-days="">清除</button>
+        </div>
+        <p id="followup-hint" style="font-size:12px; color:var(--ink-soft); margin:6px 0 0;">${(()=>{
+          if(!OVERDUE_ELIGIBLE_STATUSES.includes(c.status)) return "目前狀態不需要追蹤提醒（只有「處理中」的案件會提醒）。";
+          const fu = caseFollowup(c);
+          const due = isCaseFollowupDue(c) ? '　<b style="color:#B45309;">⏰ 已到追蹤日</b>' : '';
+          if(fu.source === "manual") return `會在 ${mdText(fu.date)} 提醒你追蹤。${due}`;
+          if(fu.source === "scheduled") return `沒有另外設定，會在預計維修日 ${mdText(fu.date)} 提醒你確認。${due}`;
+          return `沒有另外設定，依「${URGENCY_LABEL[c.urgency]||'一般'}」自動在 ${mdText(fu.date)} 提醒（每次儲存更新會重新起算）。${due}`;
+        })()}</p>
+
         <label class="field-label">維修結果說明</label>
         <textarea id="edit-result">${c.repair_result||''}</textarea>
-        <label class="field-label">維修保固期限</label>
-        <input type="date" id="edit-warranty" value="${c.warranty_until||''}">
+
+        ${(()=>{
+          const hasData = c.quote_amount!=null || c.final_amount!=null || (c.replaced_parts||'') || c.actual_arrival_date || c.warranty_until || c.store_pay_amount!=null || c.needs_approval;
+          const filled = [c.quote_amount!=null && '報價', c.final_amount!=null && '費用', (c.replaced_parts||'') && '零件', c.actual_arrival_date && '到場日', c.warranty_until && '保固', c.store_pay_amount!=null && '門市自付'].filter(Boolean);
+          return `
+        <details ${hasData ? 'open' : ''} style="margin-top:14px; border:1px solid var(--border); border-radius:8px; padding:8px 12px;">
+          <summary style="cursor:pointer; font-size:13px; font-weight:700; color:var(--ink-soft);">💰 費用與零件${filled.length ? `（已填：${filled.join('、')}）` : '（選填，需要時再展開）'}</summary>
+          <div class="grid grid-2">
+            <div><label class="field-label">報價金額（含稅）</label><input type="number" id="edit-quote" value="${c.quote_amount??''}"></div>
+            <div><label class="field-label">最終費用（含稅）</label><input type="number" id="edit-final" value="${c.final_amount??''}"></div>
+          </div>
+          <label class="field-label">更換零件</label>
+          <input type="text" id="edit-parts" value="${esc(c.replaced_parts)||''}" placeholder="例如：壓縮機、水管">
+          <div class="grid grid-2">
+            <div><label class="field-label">實際到場日期</label><input type="date" id="edit-arrival" value="${c.actual_arrival_date||''}"></div>
+            <div><label class="field-label">維修保固期限</label><input type="date" id="edit-warranty" value="${c.warranty_until||''}"></div>
+          </div>
+          <label class="field-label">門市自付金額</label>
+          <input type="number" id="edit-store-pay" value="${c.store_pay_amount??''}">
+        </details>`;
+        })()}
+      </div>
+
+      <div class="card" style="margin-top:14px; ${c.needs_manager_help ? 'background:#F3EEFB; border-color:#5E35B1;' : ''}">
+        <div class="section-title" style="margin-top:0;">🙋 需要協理協助</div>
+        <div class="checkbox-row"><input type="checkbox" id="edit-needs-help" ${c.needs_manager_help?'checked':''}><label for="edit-needs-help">這件需要協理幫忙（會排在案件列表最上面，並顯示在 Dashboard）</label></div>
+        <label class="field-label">需要協理做什麼（一句話）</label>
+        <input type="text" id="edit-help-note" value="${esc(c.manager_help_note)||''}" placeholder="例如：誠岱 3 次未回覆，是否同意換廠商">
       </div>
 
       ${renderLuoyiCard(selectedVendorInfo)}
@@ -1676,6 +1748,16 @@ async function onAction(e){
   else if(action === "confirm-derive-case"){ await confirmDeriveCase(); }
   else if(action === "open-related-case"){ await openCase(el.dataset.id); }
   else if(action === "delete-case-log"){ await deleteCaseLog(el.dataset.id); }
+  else if(action === "set-followup"){
+    const input = document.getElementById("edit-followup");
+    if(input) input.value = el.dataset.days ? addDaysYmd(ymdLocal(new Date()), Number(el.dataset.days)) : "";
+    const hint = document.getElementById("followup-hint");
+    if(hint) hint.textContent = input && input.value ? `儲存後，會在 ${mdText(input.value)} 提醒你追蹤。` : "儲存後改回依緊急程度自動提醒。";
+  }
+  else if(action === "upload-attachment-picked"){
+    const cat = document.getElementById("attach-upload-category")?.value || "other";
+    triggerAttachmentUpload("case", state.currentCase.id, cat);
+  }
   else if(action === "upload-attachment"){ triggerAttachmentUpload("case", state.currentCase.id, el.dataset.category); }
   else if(action === "upload-asset-photo"){ triggerAttachmentUpload("asset", state.currentAsset.id, "asset_photo"); }
   else if(action === "quick-add-vendor"){ await quickAddVendor(); }
@@ -1866,13 +1948,12 @@ async function loadSidebarBadgeCounts(){
     );
     state.sidebarBadges.newCases = newCases || 0;
 
-    const { count: overdueCases } = await scopedCaseQuery(
-      sb.from("cases").select("id", { count:"exact", head:true })
+    const { data: openRows } = await scopedCaseQuery(
+      sb.from("cases").select("id, status, urgency, updated_at, created_at, next_followup_date, scheduled_date")
         .in("status", OVERDUE_ELIGIBLE_STATUSES)
-        .lt("updated_at", overdueCutoffIso())
         .is("deleted_at", null)
     );
-    state.sidebarBadges.overdueCases = overdueCases || 0;
+    state.sidebarBadges.overdueCases = (openRows||[]).filter(isCaseFollowupDue).length;
 
     if(["general_affairs_supervisor","admin"].includes(p.role)){
       const { count: pendingAccounts } = await sb.from("users_profile").select("id", { count:"exact", head:true }).eq("status","disabled");
@@ -2282,7 +2363,7 @@ async function loadDashboard(){
   const monthStartStr = monthStart.toISOString().slice(0,10);
   if(["general_affairs","general_affairs_supervisor","admin"].includes(state.profile?.role)) loadStorageStats(); // 不用 await，避免拖慢 Dashboard 主要內容載入
 
-  let q = scopedCaseQuery(sb.from("cases").select("status, store_reported_done_at, store_reply_pending, urgency, repeat_fault, created_at, final_amount, closed_at, updated_at").is("deleted_at", null));
+  let q = scopedCaseQuery(sb.from("cases").select("id, case_no, status, store_reported_done_at, store_reply_pending, urgency, repeat_fault, created_at, final_amount, closed_at, updated_at, next_followup_date, scheduled_date, needs_manager_help, manager_help_note, fault_category, general_category, stores(name)").is("deleted_at", null));
   const { data: allCases, error } = await q;
   if(error){ console.error(error); return; }
 
@@ -2302,12 +2383,13 @@ async function loadDashboard(){
     else if(c.store_reply_pending && !["closed","cancelled"].includes(c.status)) stats.storeReply++;
     if(c.urgency === "urgent" && !["closed","cancelled"].includes(c.status)) stats.urgent++;
     if(c.repeat_fault && !["closed","cancelled"].includes(c.status)) stats.repeat++;
-    if(overdueEligibleSet.has(c.status) && c.updated_at && c.updated_at < overdueCutoff) stats.overdue++;
+    if(isCaseFollowupDue(c)) stats.overdue++;
     if(c.status === "closed" && c.closed_at && c.closed_at.slice(0,10) >= monthStartStr){
       stats.monthClosed++;
       stats.monthCost += Number(c.final_amount) || 0;
     }
   });
+  stats.helpCases = (allCases||[]).filter(c=> c.needs_manager_help && !["closed","cancelled"].includes(c.status));
   state.dashboardStats = stats;
 }
 
@@ -2320,15 +2402,7 @@ async function printCaseListAdmin(){
   if(!printWin){ alert("瀏覽器擋住了彈出視窗，請允許彈出視窗後再試一次"); return; }
   printWin.document.write(`<!DOCTYPE html><meta charset="UTF-8"><body style="font-family:sans-serif; padding:24px; color:#555;">資料整理中，請稍候…</body>`);
 
-  const latestLog = {};
-  try{
-    const ids = rows.map(c=>c.id);
-    for(let i=0; i<ids.length; i+=25){
-      const chunk = ids.slice(i, i+25);
-      const { data } = await sb.from("case_logs").select("case_id, note, created_at").in("case_id", chunk).order("created_at", { ascending:false }).limit(3000);
-      (data||[]).forEach(l=>{ if(!latestLog[l.case_id]) latestLog[l.case_id] = l; });
-    }
-  }catch(e){ console.warn("載入最新歷程失敗", e); }
+  const latestLog = await loadLatestCaseLogs(rows.map(c=>c.id));
 
   const now = new Date().toLocaleString('zh-TW');
   const nowMs = Date.now();
@@ -2366,8 +2440,12 @@ async function printCaseListAdmin(){
           const progress = lg
             ? `<div><b>${md(lg.created_at)}</b>${days >= 7 ? ` <span class="stale">（${days} 天無進度）</span>` : (days >= 1 ? ` <span class="sub">（${days} 天前）</span>` : ` <span class="sub">（今天）</span>`)}</div><div>${esc(cutNote(lg.note)) || '<span class="nolog">（無說明）</span>'}</div>`
             : `<span class="nolog">尚無紀錄</span>`;
+          const helpOn = c.needs_manager_help && !["closed","cancelled"].includes(c.status);
+          const helpTxt = helpOn ? `<div style="color:#4527A0; font-weight:700;">🙋 請協理協助：${esc(c.manager_help_note)||''}</div>` : '';
+          const fu = OVERDUE_ELIGIBLE_STATUSES.includes(c.status) ? caseFollowup(c) : null;
+          const fuTxt = fu ? (isCaseFollowupDue(c) ? `<div class="stale">⏰ 今天該追蹤</div>` : `<div class="sub">下次追蹤 ${mdText(fu.date)}</div>`) : '';
           return `
-          <tr data-urgent="${c.urgency==='urgent'?1:0}">
+          <tr data-urgent="${c.urgency==='urgent'?1:0}"${helpOn ? ' style="background:#F3EEFB;"' : ''}>
             <td>#${c.case_no}</td>
             <td>${esc(c.store_name)||''}</td>
             <td>${esc(c.fault_category)||esc(c.general_category)||''}${c.fault_reason ? `<div class="sub">${esc(cutNote(c.fault_reason))}</div>` : ''}</td>
@@ -2375,7 +2453,7 @@ async function printCaseListAdmin(){
             <td>${STATUS_LABEL[c.status]||c.status}</td>
             <td>${vendor ? esc(vendor.name) : '—'}</td>
             <td>${md(c.report_date || c.created_at)}</td>
-            <td>${progress}</td>
+            <td>${helpTxt}${progress}${fuTxt}</td>
           </tr>`;
         }).join("")}
       </tbody>
@@ -2390,6 +2468,42 @@ async function printCaseListAdmin(){
   setTimeout(doPrint, 800); // 部分瀏覽器重寫文件後不會再觸發 onload，保險起見延遲一次（有旗標，不會重複列印）
 }
 
+/* 每件案件最新一筆處理歷程（案件列表「最新進度」欄、列印清單共用） */
+async function loadLatestCaseLogs(ids){
+  const latest = {};
+  try{
+    for(let i=0; i<ids.length; i+=25){
+      const chunk = ids.slice(i, i+25);
+      const { data } = await sb.from("case_logs").select("case_id, note, created_at").in("case_id", chunk).order("created_at", { ascending:false }).limit(3000);
+      (data||[]).forEach(l=>{ if(!latest[l.case_id]) latest[l.case_id] = l; });
+    }
+  }catch(e){ console.warn("載入最新歷程失敗", e); }
+  return latest;
+}
+function renderFollowupLine(c){
+  if(!OVERDUE_ELIGIBLE_STATUSES.includes(c.status)) return "";
+  const fu = caseFollowup(c);
+  return isCaseFollowupDue(c)
+    ? `<div style="font-size:12px; color:#B45309; font-weight:700; margin-top:3px;">⏰ 今天該追蹤（${mdText(fu.date)}）</div>`
+    : `<div style="font-size:12px; color:var(--ink-soft); margin-top:3px;">📅 下次追蹤 ${mdText(fu.date)}${fu.source==="scheduled" ? "（預計維修日）" : ""}</div>`;
+}
+function renderLatestProgressCell(c){
+  const help = (c.needs_manager_help && !["closed","cancelled"].includes(c.status))
+    ? `<div style="font-size:13px; color:#4527A0; font-weight:700; margin-bottom:3px;">🙋 ${esc(c.manager_help_note)||'需要協理協助'}</div>` : "";
+  return help + renderLatestProgressInner(c) + renderFollowupLine(c);
+}
+function renderLatestProgressInner(c){
+  const lg = (state.caseLatestLog||{})[c.id];
+  if(!state.caseLatestLog) return `<span style="color:var(--ink-soft); font-size:12px;">載入中…</span>`;
+  if(!lg) return `<span style="color:var(--ink-soft); font-size:12px;">尚無紀錄</span>`;
+  const d = new Date(lg.created_at);
+  const days = Math.floor((Date.now() - d.getTime()) / 86400000);
+  const ago = days >= 7 ? `<b style="color:#B42318;">${days} 天無進度</b>` : (days >= 1 ? `${days} 天前` : `今天`);
+  const note = String(lg.note||"").replace(/\s+/g," ").trim();
+  return `<div style="font-size:12px; color:var(--ink-soft); white-space:nowrap;">${d.getMonth()+1}/${d.getDate()}・${ago}</div>
+    <div title="${esc(note)}" style="font-size:13px; line-height:1.4; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden;">${esc(note)}</div>`;
+}
+
 async function loadCases(){
   const f = state.caseFilters;
   // 用「報告日期」排序，不是用「建檔時間」：這樣補登的舊案件會照它實際發生的日期排列，
@@ -2402,7 +2516,7 @@ async function loadCases(){
   } else {
     q = q.is("deleted_at", null);
     if(f.overdueOnly){
-      q = q.in("status", OVERDUE_ELIGIBLE_STATUSES).lt("updated_at", overdueCutoffIso());
+      q = q.in("status", OVERDUE_ELIGIBLE_STATUSES);
     } else {
       if(f.status) q = q.eq("status", f.status);
       if(f.storeReplyOnly) q = q.eq("store_reply_pending", true).not("status", "in", "(closed,cancelled)");
@@ -2415,6 +2529,17 @@ async function loadCases(){
   const { data, error } = await q;
   if(error){ alert("載入失敗：" + error.message); return; }
   state.cases = (data||[]).map(c=>({ ...c, store_name: c.stores?.name || "" }));
+  if(f.overdueOnly && !f.showArchived) state.cases = state.cases.filter(isCaseFollowupDue);
+  // 需要協理協助的案件排在最上面（其餘維持原本的報告日期排序）
+  state.cases.sort((a,b)=> (b.needs_manager_help && !["closed","cancelled"].includes(b.status) ? 1 : 0) - (a.needs_manager_help && !["closed","cancelled"].includes(a.status) ? 1 : 0));
+  // 最新進度：先畫出列表，再背景載入，不拖慢開頁速度
+  state.caseLatestLog = null;
+  const ids = state.cases.map(c=>c.id);
+  loadLatestCaseLogs(ids).then(latest=>{
+    if(state.cases.map(c=>c.id).join() !== ids.join()) return; // 期間換過篩選就丟掉
+    state.caseLatestLog = latest;
+    if(state.view === "case-list") render();
+  });
 }
 
 function applyQuickFilter(key){
@@ -3154,11 +3279,21 @@ async function saveCase(btn){
     broad_impact: document.getElementById("edit-broad-impact").checked,
     needs_approval: document.getElementById("edit-needs-approval").checked,
     approval_type: document.getElementById("edit-approval-type").value || null,
+    next_followup_date: document.getElementById("edit-followup").value || null,
+    needs_manager_help: document.getElementById("edit-needs-help").checked,
+    manager_help_note: document.getElementById("edit-help-note").value.trim() || null,
     manager_approved: document.getElementById("edit-manager-approved") ? document.getElementById("edit-manager-approved").checked : document.getElementById("edit-manager-approved-readonly").value === "1",
     manager_approved_note: document.getElementById("edit-manager-note") ? (document.getElementById("edit-manager-note").value || null) : (document.getElementById("edit-manager-note-readonly").value || null),
     updated_at: new Date().toISOString()
   };
   if(newStatus === "closed" && !c.closed_at) updates.closed_at = new Date().toISOString();
+  // 追蹤日已經到了、而且這次沒有改它：代表你正在處理這件，清掉讓系統改回自動起算
+  if(updates.next_followup_date && updates.next_followup_date === c.next_followup_date && updates.next_followup_date <= ymdLocal(new Date())) updates.next_followup_date = null;
+  // 結案時只問一欄：最終費用（讓費用統計有資料）
+  if(newStatus === "closed" && c.status !== "closed" && updates.final_amount == null){
+    const ans = prompt("結案前請填「最終費用」（含稅）。\n免費、保固內或門市自行排除請填 0；按「取消」則先不填。", "");
+    if(ans !== null && ans.trim() !== "" && !isNaN(Number(ans.replace(/,/g,"")))) updates.final_amount = Number(ans.replace(/,/g,""));
+  }
 
   const { error } = await sb.from("cases").update(updates).eq("id", c.id);
   if(error){
@@ -3175,8 +3310,12 @@ async function saveCase(btn){
   const newVendorId = updates.vendor_id || null;
   const vendorChanged = oldVendorId !== newVendorId;
 
-  if(statusChanged || vendorChanged || note){
+  const helpChanged = !!updates.needs_manager_help !== !!c.needs_manager_help || (updates.needs_manager_help && (updates.manager_help_note||"") !== (c.manager_help_note||""));
+  const followupChanged = (updates.next_followup_date||null) !== (c.next_followup_date||null) && !!updates.next_followup_date;
+  if(statusChanged || vendorChanged || note || helpChanged || followupChanged){
     const parts = [];
+    if(helpChanged) parts.push(updates.needs_manager_help ? `🙋 請協理協助：${updates.manager_help_note||"（未填內容）"}` : "已取消「需要協理協助」");
+    if(followupChanged) parts.push(`下次追蹤日設為 ${mdText(updates.next_followup_date)}`);
     if(statusChanged) parts.push(`狀態更新為「${STATUS_LABEL[newStatus]}」`);
     if(vendorChanged){
       const newVendorName = newVendorId ? (state.vendors.find(v=>v.id===newVendorId)?.name || "（未知廠商）") : "（清空）";
