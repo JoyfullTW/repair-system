@@ -163,7 +163,7 @@
 </head>
 <body>
 <div id="app"></div>
-<div class="version-badge">admin build 76</div>
+<div class="version-badge">admin build 77</div>
 
 <script>
 function esc(t){ return String(t==null?'':t).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;"); }
@@ -3057,6 +3057,7 @@ async function openCase(id){
   state.caseStoreContact = null;
   loadCaseStoreContact(data.store_id);
   loadCaseAsset(data.asset_id);
+  if(data.vendor_id && !state.vendors.find(v=>v.id===data.vendor_id)) loadVendors().then(()=>{ if(state.view === "case-detail") render(); });
   loadCaseLineBindings(data.created_by);
   loadRelatedCases(data);
 }
@@ -3333,6 +3334,8 @@ async function saveCase(btn){
 
   const helpChanged = !!updates.needs_manager_help !== !!c.needs_manager_help || (updates.needs_manager_help && (updates.manager_help_note||"") !== (c.manager_help_note||""));
   const followupChanged = (updates.next_followup_date||null) !== (c.next_followup_date||null) && !!updates.next_followup_date;
+  // 廠商是在這個頁面開啟之後才新增的話，state.vendors 裡還沒有它，先重新載入廠商清單，避免歷程寫成「未知廠商」
+  if(vendorChanged && newVendorId && !state.vendors.find(v=>v.id===newVendorId)) await loadVendors();
   if(statusChanged || vendorChanged || note || helpChanged || followupChanged){
     const parts = [];
     if(helpChanged) parts.push(updates.needs_manager_help ? `🙋 請協理協助：${updates.manager_help_note||"（未填內容）"}` : "已取消「需要協理協助」");
@@ -3448,7 +3451,7 @@ function buildTaishengFields(){
     { key:"contact", label:"聯絡人",    value: c.reporter_name || sc.contact_name || "" },
     { key:"phone",   label:"聯絡電話",  value: c.reporter_phone || sc.mobile || sc.phone || "" },
     { key:"model",   label:"設備型號",  value: model || (c.fault_category || ""), hint: model ? "（取自資產資料）" : "（資產沒有型號，請看銘牌照片補上）" },
-    { key:"gas",     label:"瓦斯類型",  value: "", hint:"（下拉選單：天然瓦斯／液態瓦斯；電器設備可不選）", noCopy:true },
+    { key:"gas",     label:"瓦斯類型",  value: "", hint:"（門市都是天然瓦斯；太盛負責的都是電器設備，不用選）", noCopy:true },
     { key:"type",    label:"叫修類型",  value: c.urgency === "urgent" ? "急修" : "一般修", hint:"（下拉選單：一般修／急修）" },
     { key:"reason",  label:"故障原因",  value: reason },
     { key:"photos",  label:"照片／影片", value: photos.join(" "), hint: photos.length ? "（表單要直接上傳檔案，請先從右側附件下載）" : "（這個案件目前沒有故障照片）", noCopy:true },
